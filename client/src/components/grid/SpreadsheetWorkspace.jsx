@@ -169,15 +169,17 @@ function SpreadsheetWorkspace({
     scrollPos.current = { top: node.scrollTop, left: node.scrollLeft };
   }
 
-  function columnWidth(fieldId) {
-    return columnWidths[fieldId] || 180;
+  function columnSize(fieldId) {
+    const width = columnWidths[fieldId];
+    if (width) return { width, minWidth: width };
+    return { minWidth: 160 };
   }
 
   function beginResize(fieldId, event) {
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
-    const startWidth = columnWidth(fieldId);
+    const startWidth = columnWidths[fieldId] || 180;
     function onMove(moveEvent) {
       const next = Math.max(96, startWidth + moveEvent.clientX - startX);
       setColumnWidths((current) => ({ ...current, [fieldId]: next }));
@@ -323,7 +325,7 @@ function SpreadsheetWorkspace({
                 {fields.map((field) => {
                   const direction = sort?.fieldId === field.id ? sort.direction : "";
                   return (
-                    <th key={field.id} className="col-head" scope="col" style={{ width: columnWidth(field.id) }}>
+                    <th key={field.id} className="col-head" scope="col" style={columnSize(field.id)}>
                       <div className="col-head-main">
                         <button
                           className="col-name"
@@ -471,7 +473,7 @@ function SpreadsheetWorkspace({
                           <td
                             key={field.id}
                             className={className}
-                            style={{ width: columnWidth(field.id), maxWidth: columnWidth(field.id) }}
+                            style={columnSize(field.id)}
                             onClick={() => {
                               setSelection({ recordId: record.id, fieldIndex });
                               setEditing(false);

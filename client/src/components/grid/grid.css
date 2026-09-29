@@ -232,7 +232,7 @@
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  table-layout: fixed;
+  table-layout: auto;
   font-size: 14px;
 }
 
@@ -385,6 +385,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .col-name {
@@ -395,8 +396,9 @@
   color: inherit;
   font: inherit;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -761,6 +763,13 @@
 .dropzone.is-active {
   border-color: #4f46e5;
   background: #eef2ff;
+}
+
+.import-error {
+  margin: 12px 0 0;
+  color: #9f1239;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .import-lead {

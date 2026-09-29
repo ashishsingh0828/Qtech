@@ -31,7 +31,6 @@ function DatasetDetail() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState([]);
@@ -327,32 +326,16 @@ function DatasetDetail() {
     }
   }
 
-  async function previewWorkbook(file) {
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const { data } = await axios.post(`${API_BASE}/api/datasets/${id}/preview-excel`, form, authConfig());
-      return data;
-    } catch (err) {
-      if (err.response?.status === 401) {
-        clearSession(navigate);
-        throw new Error("Sign in required");
-      }
-      throw new Error(await messageFromResponse(err, "Unable to preview this spreadsheet."));
-    }
-  }
-
   async function confirmImport(file) {
     const form = new FormData();
     form.append("file", file);
-    form.append("createMissing", "true");
     try {
       const { data } = await axios.post(`${API_BASE}/api/datasets/${id}/import-excel`, form, authConfig());
       setImportOpen(false);
       await loadSheet();
-      const count = data.importedCount ?? 0;
-      setNotice(`Imported ${count} ${count === 1 ? "row" : "rows"} from ${file.name}.`);
-      notify("File uploaded");
+      const columns = data.totalColumns ?? 0;
+      const rows = data.totalRows ?? 0;
+      notify(`Successfully imported ${columns} columns and ${rows} rows`);
     } catch (err) {
       if (err.response?.status === 401) {
         clearSession(navigate);
@@ -428,7 +411,6 @@ function DatasetDetail() {
       />
 
       {error ? <p className="sheet-banner is-error">{error}</p> : null}
-      {notice ? <p className="sheet-banner">{notice}</p> : null}
 
       <SpreadsheetWorkspace
         fields={fields}
@@ -497,7 +479,6 @@ function DatasetDetail() {
         key={importKey}
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onPreview={previewWorkbook}
         onConfirm={confirmImport}
       />
       <FieldPermissionManager

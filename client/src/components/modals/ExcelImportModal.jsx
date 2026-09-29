@@ -7,51 +7,42 @@ function isExcelFile(file) {
   return name.endsWith(".xlsx") || name.endsWith(".xls");
 }
 
-function ExcelImportModal({ open, onClose, onPreview, onConfirm }) {
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ExcelImportModal({ open, onClose, onConfirm }) {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [previewError, setPreviewError] = useState("");
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [fileError, setFileError] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
 
   if (!open) return null;
 
-  const previewRows = (preview?.preview || []).slice(0, 3);
-
-  async function acceptFile(nextFile) {
+  function acceptFile(nextFile) {
     if (!nextFile) return;
     if (!isExcelFile(nextFile)) {
       setFile(null);
-      setPreview(null);
-      setPreviewError("Choose an .xlsx or .xls file.");
+      setFileError("Choose an .xlsx or .xls file.");
       return;
     }
     setFile(nextFile);
-    setPreview(null);
-    setPreviewError("");
+    setFileError("");
     setImportError("");
-    setPreviewLoading(true);
-    try {
-      const data = await onPreview(nextFile);
-      setPreview(data);
-    } catch (error) {
-      setPreviewError(error?.message || "Unable to preview this spreadsheet.");
-    } finally {
-      setPreviewLoading(false);
-    }
   }
 
   async function confirmImport() {
-    if (!file || !preview) return;
+    if (!file || importing) return;
     setImporting(true);
     setImportError("");
     try {
       await onConfirm(file);
       setFile(null);
-      setPreview(null);
     } catch (error) {
       setImportError(error?.message || "Unable to import this spreadsheet.");
     } finally {
@@ -63,11 +54,11 @@ function ExcelImportModal({ open, onClose, onPreview, onConfirm }) {
     <div
       className="modal-backdrop"
       onClick={() => {
-        if (!importing && !previewLoading) onClose();
+        if (!importing) onClose();
       }}
     >
       <div
-        className="modal-panel is-wide"
+        className="modal-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="excel-import-title"
@@ -76,7 +67,7 @@ function ExcelImportModal({ open, onClose, onPreview, onConfirm }) {
         <div className="modal-heading">
           <div>
             <h2 id="excel-import-title">Import Excel</h2>
-            <p className="import-lead">Blank columns are removed. Matching headers land in existing fields, and new headers are added as text columns.</p>
+            <p className="import-lead">Every header and every data row in the first sheet is written to this dataset.</p>
           </div>
           <button className="icon-button" type="button" aria-label="Close" onClick={onClose} disabled={importing}>
             <X size={18} />
@@ -98,7 +89,7 @@ function ExcelImportModal({ open, onClose, onPreview, onConfirm }) {
         >
           <FileSpreadsheet size={32} aria-hidden="true" />
           <p>{file ? file.name : "Drag an .xlsx or .xls file here"}</p>
-          <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={previewLoading || importing}>
+          <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={importing}>
             Choose file
           </button>
           <input
@@ -113,51 +104,23 @@ function ExcelImportModal({ open, onClose, onPreview, onConfirm }) {
           />
         </div>
 
-        {previewError ? <p className="sheet-banner is-error">{previewError}</p> : null}
-        {importError ? <p className="sheet-banner is-error">{importError}</p> : null}
-        {previewLoading ? <p className="import-summary">Reading spreadsheet…</p> : null}
-
-        {preview && file ? (
+        {file ? (
           <div className="import-card">
             <p className="import-file">{file.name}</p>
-            <p className="import-summary">
-              Found {preview.headers.length} {preview.headers.length === 1 ? "column" : "columns"}, {preview.totalRows} {preview.totalRows === 1 ? "row" : "rows"}
-            </p>
-            <div className="preview-scroll">
-              <table className="preview-table">
-                <thead>
-                  <tr>
-                    {preview.headers.map((header) => (
-                      <th key={header} className="is-mapped">{header}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row, index) => (
-                    <tr key={`${file.name}-${index}`}>
-                      {preview.headers.map((header) => (
-                        <td key={header}>{row[header] || "—"}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <p className="import-summary">{formatFileSize(file.size)}</p>
           </div>
         ) : null}
+
+        {fileError ? <p className="import-error">{fileError}</p> : null}
+        {importError ? <p className="import-error">{importError}</p> : null}
 
         <div className="modal-actions">
           <button className="ghost-button" type="button" onClick={onClose} disabled={importing}>
             Cancel
           </button>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={confirmImport}
-            disabled={!preview || previewLoading || importing || preview.totalRows === 0}
-          >
+          <button className="primary-button" type="button" onClick={confirmImport} disabled={!file || importing}>
             {importing ? <span className="spinner" aria-hidden="true" /> : null}
-            {importing ? "Importing…" : "Direct Import to Sheet"}
+            {importing ? "Importing all rows and columns..." : "Confirm & Upload"}
           </button>
         </div>
       </div>
