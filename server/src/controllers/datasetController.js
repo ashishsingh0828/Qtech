@@ -123,6 +123,9 @@ const getDatasets = async (req, res) => {
         d.is_deleted,
         d.deleted_at,
         d.updated_at AS last_modified_at,
+        d.source_file_name,
+        d.row_count,
+        d.column_count,
         COALESCE(editor.name, creator.name) AS last_modified_by,
         COUNT(DISTINCT f.id)::int AS fields_count,
         COUNT(DISTINCT r.id)::int AS records_count

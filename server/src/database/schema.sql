@@ -61,6 +61,10 @@ CREATE TABLE datasets (
     updated_by INTEGER REFERENCES users(id),
     is_deleted BOOLEAN DEFAULT FALSE,
     deleted_at TIMESTAMP,
+    source_file_name VARCHAR(255),
+    row_count INTEGER,
+    column_count INTEGER,
+    schema JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -96,6 +100,7 @@ CREATE TABLE records (
     updated_by INTEGER REFERENCES users(id),
     is_deleted BOOLEAN DEFAULT FALSE,
     position INTEGER,
+    data JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -43,6 +43,11 @@ async function applySchema() {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_fields_dataset_id ON fields(dataset_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_audit_logs_record_field ON audit_logs(record_id, field_id)");
   await pool.query("ALTER TABLE fields ADD COLUMN IF NOT EXISTS group_name VARCHAR(120)");
+  await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_file_name VARCHAR(255)");
+  await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS row_count INTEGER");
+  await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS column_count INTEGER");
+  await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS schema JSONB");
+  await pool.query("ALTER TABLE records ADD COLUMN IF NOT EXISTS data JSONB");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,

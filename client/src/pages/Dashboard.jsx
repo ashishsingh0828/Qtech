@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Download, FolderOpen, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import ExcelDropzone from "../components/import/ExcelDropzone";
 import "./Dashboard.css";
 import { useToast } from "../components/toast-context";
 
@@ -228,7 +229,7 @@ function Dashboard() {
     setError("");
 
     try {
-      const response = await axios.get(`${API_BASE}/api/datasets/${dataset.id}/export-excel`, {
+      const response = await axios.get(`${API_BASE}/api/datasets/${dataset.id}/export`, {
         ...authConfig(),
         responseType: "blob",
       });
@@ -372,6 +373,15 @@ function Dashboard() {
             </div>
           </div>
 
+          {!showArchived ? (
+            <ExcelDropzone
+              navigate={navigate}
+              onImported={(dataset) => {
+                if (dataset?.id) navigate(`/datasets/${dataset.id}`);
+              }}
+            />
+          ) : null}
+
           <div className="stats-banner">
             <article>
               <span>Total Equipment</span>
@@ -506,8 +516,8 @@ function Dashboard() {
                     </div>
                     <p className="file-card-desc">{dataset.description || "No description"}</p>
                     <div className="file-card-badges">
-                      <span className="count-badge">{dataset.records_count ?? 0} records</span>
-                      <span className="count-badge">{dataset.fields_count ?? 0} columns</span>
+                      <span className="count-badge">{dataset.row_count ?? dataset.records_count ?? 0} records</span>
+                      <span className="count-badge">{dataset.column_count ?? dataset.fields_count ?? 0} columns</span>
                     </div>
                     {!dataset.is_deleted ? (
                       <div className="file-card-actions">
