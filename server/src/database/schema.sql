@@ -118,19 +118,12 @@ CREATE TABLE record_values (
 
 CREATE TABLE audit_logs (
     id SERIAL PRIMARY KEY,
-
-    user_id INTEGER REFERENCES users(id),
-
-    dataset_id INTEGER REFERENCES datasets(id),
     record_id INTEGER REFERENCES records(id),
     field_id INTEGER REFERENCES fields(id),
-
-    action VARCHAR(50) NOT NULL,
-
+    changed_by INTEGER REFERENCES users(id),
     old_value TEXT,
     new_value TEXT,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================
@@ -173,14 +166,14 @@ ON record_values(record_id);
 CREATE INDEX idx_record_values_field_id
 ON record_values(field_id);
 
-CREATE INDEX idx_audit_logs_user_id
-ON audit_logs(user_id);
-
-CREATE INDEX idx_audit_logs_dataset_id
-ON audit_logs(dataset_id);
+CREATE INDEX idx_audit_logs_changed_by
+ON audit_logs(changed_by);
 
 CREATE INDEX idx_audit_logs_record_id
 ON audit_logs(record_id);
+
+CREATE INDEX idx_audit_logs_field_id
+ON audit_logs(field_id);
 
 CREATE INDEX idx_uploaded_files_dataset_id
 ON uploaded_files(dataset_id);

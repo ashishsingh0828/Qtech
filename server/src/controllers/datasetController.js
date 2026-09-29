@@ -568,7 +568,7 @@ const updateCell = async (req, res) => {
     );
 
     const current = currentResult.rows[0] || null;
-    const previous = current ? current.value : null;
+    const previous = current && current.value != null && current.value !== "" ? current.value : null;
     const previousComparable = previous == null ? "" : String(previous);
 
     if (previousComparable === normalized) {
@@ -577,7 +577,7 @@ const updateCell = async (req, res) => {
         success: true,
         updated: {
           field_id: fieldId,
-          value: previous == null ? normalized : previous,
+          value: normalized,
         },
       });
     }
@@ -604,18 +604,16 @@ const updateCell = async (req, res) => {
     await client.query(
       `
       INSERT INTO audit_logs (
-        user_id,
-        dataset_id,
         record_id,
         field_id,
-        action,
+        changed_by,
         old_value,
         new_value,
-        created_at
+        changed_at
       )
-      VALUES ($1, $2, $3, $4, 'cell_update', $5, $6, NOW())
+      VALUES ($1, $2, $3, $4, $5, NOW())
       `,
-      [changedBy, datasetId, recordId, fieldId, previous, normalized]
+      [recordId, fieldId, changedBy, previous, normalized === "" ? null : normalized]
     );
 
     await client.query(
@@ -680,13 +678,13 @@ const getAuditLogs = async (req, res) => {
         u.name AS changed_by_name,
         a.old_value,
         a.new_value,
-        a.created_at AS changed_at
+        a.changed_at
       FROM audit_logs a
       JOIN records r ON r.id = a.record_id
-      LEFT JOIN users u ON u.id = a.user_id
-      LEFT JOIN fields f ON f.id = a.field_id
+      JOIN users u ON u.id = a.changed_by
+      JOIN fields f ON f.id = a.field_id
       WHERE r.dataset_id = $1
-      ORDER BY a.created_at DESC
+      ORDER BY a.changed_at DESC
       LIMIT 50
       `,
       [datasetId]
