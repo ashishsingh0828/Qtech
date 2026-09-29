@@ -1,0 +1,197 @@
+.dashboard {
+  min-height: 100svh;
+  background: #f4f1ea;
+  color: #102033;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 28px;
+  background: #fffdf9;
+  border-bottom: 1px solid #e6dfd2;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.brand-lockup .brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #f6f1e7;
+  background: #102033;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-meta strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #ece7dc;
+  color: #3d4d61;
+}
+
+.role-admin {
+  background: #e5f4f1;
+  color: #0a534a;
+}
+
+.role-manager {
+  background: #f8efdc;
+  color: #8a5a12;
+}
+
+.logout-button,
+.upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.logout-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #ddd4c6;
+  background: #fff;
+  color: #243246;
+}
+
+.logout-button:hover {
+  background: #f7f4ee;
+}
+
+.dashboard-main {
+  padding: 32px 28px 48px;
+}
+
+.dataset-card {
+  max-width: 980px;
+  margin: 0 auto;
+  background: #fffdf9;
+  border: 1px solid #e6dfd2;
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(16, 32, 51, 0.06);
+  overflow: hidden;
+}
+
+.dataset-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px 28px 0;
+}
+
+.dataset-card h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  color: #102033;
+}
+
+.dataset-card-head p {
+  margin: 8px 0 0;
+  color: #5d6b7c;
+  font-size: 15px;
+}
+
+.upload-button {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  background: #0e6e62;
+  color: #fffdf9;
+}
+
+.upload-button:hover {
+  background: #0a534a;
+}
+
+.dataset-placeholder {
+  margin: 24px 28px 28px;
+  min-height: 220px;
+  border: 1px dashed #d7cebf;
+  border-radius: 14px;
+  background: #faf7f1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #6d7b8c;
+}
+
+.dataset-placeholder p {
+  margin: 0;
+  font-size: 15px;
+}
+
+.logout-button:focus-visible,
+.upload-button:focus-visible {
+  outline: 2px solid #0e6e62;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .dashboard-header,
+  .dataset-card-head,
+  .header-user,
+  .user-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dashboard-header,
+  .dashboard-main {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .upload-button,
+  .logout-button {
+    width: 100%;
+  }
+
+  .dataset-card h1 {
+    font-size: 24px;
+  }
+}
