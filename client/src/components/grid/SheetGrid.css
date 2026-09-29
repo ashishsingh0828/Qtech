@@ -144,8 +144,15 @@
   transition: transform 160ms var(--ease);
 }
 
-.pms-toggle.is-open {
-  transform: rotate(90deg);
+.sheet-lock-cell {
+  display: none;
+  margin-left: 6px;
+  vertical-align: -2px;
+  color: var(--gold);
+}
+
+.sheet-cell.is-readonly:hover .sheet-lock-cell {
+  display: inline-block;
 }
 
 @keyframes row-flash {
@@ -326,8 +333,27 @@
 
 .excel-drop p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--ink-2);
   font-size: 13px;
+}
+
+.excel-file {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.excel-file.is-empty {
+  color: var(--muted);
+}
+
+.excel-drop-actions .button-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .excel-drop-actions {

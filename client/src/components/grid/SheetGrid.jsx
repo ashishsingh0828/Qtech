@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Lock, MoreHorizontal, Trash2 } from "lucide-react";
+import { Lock, Minus, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useToast } from "../toast-context";
 import { dueTone, formatCell, orderedColumns, pinnedCount, rawCell, statusTone } from "../../lib/sheetFormat";
 import "./SheetGrid.css";
@@ -244,13 +244,13 @@ function SheetGrid({
                     <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }} data-group-key={group.groupKey}>
                       {group.groupKey === "schedule_services" ? (
                         <button
-                          className={pmsOpen === false ? "pms-toggle" : "pms-toggle is-open"}
+                          className="pms-toggle"
                           type="button"
                           aria-expanded={pmsOpen !== false}
                           aria-label={pmsOpen === false ? "Expand PMS columns" : "Collapse PMS columns"}
                           onClick={onTogglePms}
                         >
-                          <ChevronRight size={14} strokeWidth={1.5} />
+                          {pmsOpen === false ? <Plus size={14} strokeWidth={1.5} /> : <Minus size={14} strokeWidth={1.5} />}
                         </button>
                       ) : null}
                       {group.label}
@@ -340,8 +340,15 @@ function SheetGrid({
                       }}
                       onClick={(event) => {
                         setSelected({ rowId: row.id, key: column.key });
-                        if (column.semantic === "validated" && canValidate) openPopover("validate", row, event);
-                        else if (column.semantic === "verified" && canVerify) openPopover("verify", row, event);
+                        if (column.semantic === "validated" && canValidate) {
+                          openPopover("validate", row, event);
+                          return;
+                        }
+                        if (column.semantic === "verified" && canVerify) {
+                          openPopover("verify", row, event);
+                          return;
+                        }
+                        if (!editable.has(column.key)) notify(denialMessage || "You cannot edit that column.");
                       }}
                       onDoubleClick={() => beginEdit(row, column)}
                     >
@@ -372,9 +379,15 @@ function SheetGrid({
                       ) : column.semantic === "days" && Number(value) < 0 ? (
                         <span className="status-pill tone-ruby">{shown}</span>
                       ) : tone ? (
-                        <span className={`status-pill tone-${tone}`}>{shown}</span>
+                        <span className={`status-pill tone-${tone}`}>
+                          {shown}
+                          {editable.has(column.key) ? null : <Lock className="sheet-lock-cell" size={12} strokeWidth={1.5} aria-hidden="true" />}
+                        </span>
                       ) : (
-                        <span className={shown ? "sheet-value" : "sheet-empty"} title={shown}>{shown || ""}</span>
+                        <span className={shown ? "sheet-value" : "sheet-empty"} title={shown}>
+                          {shown || ""}
+                          {editable.has(column.key) ? null : <Lock className="sheet-lock-cell" size={12} strokeWidth={1.5} aria-hidden="true" />}
+                        </span>
                       )}
                     </div>
                   );

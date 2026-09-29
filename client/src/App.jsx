@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
-import DatasetDetail from "./pages/DatasetDetail";
+import SpreadsheetWorkspace from "./components/grid/SpreadsheetWorkspace";
 import UsersPage from "./pages/UsersPage";
 import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -52,7 +52,7 @@ function App() {
               }
             >
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/datasets/:id" element={<DatasetDetail />} />
+              <Route path="/datasets/:id" element={<SpreadsheetWorkspace />} />
               <Route path="/users" element={<UsersRoute />} />
               <Route path="/audit" element={<AuditPage />} />
               <Route path="/settings" element={<SettingsPage />} />

@@ -327,6 +327,11 @@ const updateAmc = async (req, res) => {
       assign(stored, columnBySemantic(schema, "ack_response"), next);
       assign(stored, columnBySemantic(schema, "ack_note"), note);
       assign(stored, columnBySemantic(schema, "ack_at"), new Date().toISOString());
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "nextFollowUp")) {
+        const follow = dateOnly(req.body.nextFollowUp);
+        if (req.body.nextFollowUp && !follow) return res.status(400).json({ error: "Next follow-up must be a date." });
+        assign(stored, columnBySemantic(schema, "next_follow_up"), follow || "");
+      }
     } else {
       assign(stored, statusColumn, "");
       assign(stored, columnBySemantic(schema, "proposal_sent_at"), "");

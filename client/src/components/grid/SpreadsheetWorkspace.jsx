@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import SheetGrid from "../components/grid/SheetGrid";
-import RowDrawer from "../components/sheet/RowDrawer";
-import ValidationModal from "../components/sheet/ValidationModal";
-import { useToast } from "../components/toast-context";
-import { useAuth } from "../auth/AuthProvider";
+import SheetGrid from "./SheetGrid";
+import RowDrawer from "../sheet/RowDrawer";
+import ValidationModal from "../sheet/ValidationModal";
+import { useToast } from "../toast-context";
+import { useAuth } from "../../auth/AuthProvider";
 import { editDenialMessage, getEditableColumnKeys } from "@shared/permissions.js";
-import { publishSheet } from "../lib/sheetBridge";
+import { publishSheet } from "../../lib/sheetBridge";
 import {
   API_BASE,
   authConfig,
@@ -15,8 +15,8 @@ import {
   downloadName,
   errorMessage,
   messageFromResponse,
-} from "../lib/session";
-import "../components/sheet/sheet-actions.css";
+} from "../../lib/session";
+import "../sheet/sheet-actions.css";
 
 const TABS = [
   ["all", "All"],
@@ -29,7 +29,7 @@ const TABS = [
   ["follow_up_due", "Follow-ups Due"],
 ];
 
-function DatasetDetail() {
+function SpreadsheetWorkspace() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const { session } = useAuth();
@@ -426,4 +426,4 @@ function DatasetDetail() {
   );
 }
 
-export default DatasetDetail;
+export default SpreadsheetWorkspace;

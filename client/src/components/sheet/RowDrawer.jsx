@@ -36,6 +36,7 @@ function RowDrawer({
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [proposalDate, setProposalDate] = useState("");
+  const [followUp, setFollowUp] = useState("");
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -119,8 +120,12 @@ function RowDrawer({
                   Note
                   <textarea value={note} rows={3} onChange={(event) => setNote(event.target.value)} />
                 </label>
-                <button className="button-primary" type="button" disabled={acting} onClick={() => onAmc(row, { action: "acknowledge", note })}>Acknowledged</button>
-                <button className="button-secondary" type="button" disabled={acting} onClick={() => onAmc(row, { action: "decline", note })}>Declined</button>
+                <label>
+                  Next follow up
+                  <input type="date" value={followUp} onChange={(event) => setFollowUp(event.target.value)} />
+                </label>
+                <button className="button-primary" type="button" disabled={acting} onClick={() => onAmc(row, { action: "acknowledge", note, nextFollowUp: followUp || undefined })}>Acknowledged</button>
+                <button className="button-secondary" type="button" disabled={acting} onClick={() => onAmc(row, { action: "decline", note, nextFollowUp: followUp || undefined })}>Declined</button>
               </div>
             ) : null}
             {permissions.canResetAmc && amc !== "Not Due" && amc !== "AMC Due" ? (
