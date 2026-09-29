@@ -60,6 +60,7 @@ CREATE TABLE datasets (
     created_by INTEGER REFERENCES users(id),
     updated_by INTEGER REFERENCES users(id),
     is_deleted BOOLEAN DEFAULT FALSE,
+    deleted_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

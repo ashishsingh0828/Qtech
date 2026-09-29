@@ -5,6 +5,7 @@ require("dotenv").config();
 const pool = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const datasetRoutes = require("./routes/datasetRoutes");
+const userRoutes = require("./routes/userRoutes");
 
 const app = express();
 
@@ -14,6 +15,13 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/datasets", datasetRoutes);
+app.use("/api/users", userRoutes);
+
+pool
+  .query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+  .catch((error) => {
+    console.error("Schema ensure error:", error);
+  });
 
 app.get("/", (req, res) => {
   res.json({

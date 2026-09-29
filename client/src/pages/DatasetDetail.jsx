@@ -394,7 +394,7 @@ function DatasetDetail() {
     setPreview(null);
     setPreviewError("");
     setImportError("");
-    setCreateMissing(true);
+    setCreateMissing(roleLabel === "Admin");
     setDragOver(false);
     setImportOpen(true);
   }
@@ -711,7 +711,7 @@ function DatasetDetail() {
                 <p>{dataset.description || "No description"}</p>
               ) : null}
             </div>
-            {dataset ? (
+            {dataset && roleLabel === "Admin" ? (
               <button className="upload-button" type="button" onClick={openModal}>
                 <Plus size={18} strokeWidth={2} aria-hidden="true" />
                 Add Column
@@ -1095,15 +1095,17 @@ function DatasetDetail() {
                   <p className="page-message">No data rows were detected below the header.</p>
                 )}
 
-                <label className="check-row import-check">
-                  <input
-                    type="checkbox"
-                    checked={createMissing}
-                    onChange={(event) => setCreateMissing(event.target.checked)}
-                    disabled={importing}
-                  />
-                  Create columns for unmatched headers
-                </label>
+                {roleLabel === "Admin" ? (
+                  <label className="check-row import-check">
+                    <input
+                      type="checkbox"
+                      checked={createMissing}
+                      onChange={(event) => setCreateMissing(event.target.checked)}
+                      disabled={importing}
+                    />
+                    Create columns for unmatched headers
+                  </label>
+                ) : null}
               </div>
             ) : null}
 

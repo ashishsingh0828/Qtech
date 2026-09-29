@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const XLSX = require("xlsx");
+const { canonicalRole } = require("../middleware/auth");
 const { normalizeFieldKey, normalizeCellValue } = require("./datasetController");
 
 function cellToString(value) {
@@ -165,6 +166,10 @@ const importExcel = async (req, res) => {
   const datasetId = parseDatasetId(req.params.id);
   const createdBy = Number(req.user?.id);
   const createMissing = String(req.body?.createMissing || "").toLowerCase() === "true";
+
+  if (createMissing && canonicalRole(req.user?.role) !== "Admin") {
+    return res.status(403).json({ error: "Only an Admin can create columns" });
+  }
 
   if (!datasetId) return res.status(400).json({ error: "Invalid dataset id" });
   if (!Number.isInteger(createdBy) || createdBy <= 0) {

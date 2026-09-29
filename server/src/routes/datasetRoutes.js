@@ -1,6 +1,6 @@
 const express = require("express");
 const multer = require("multer");
-const { requireAuth } = require("../middleware/authMiddleware");
+const { requireAuth, requireRole } = require("../middleware/auth");
 const {
   getDatasets,
   createDataset,
@@ -9,6 +9,8 @@ const {
   getRecords,
   createRecord,
   deleteRecord,
+  softDeleteDataset,
+  restoreDataset,
   updateCell,
   getAuditLogs,
 } = require("../controllers/datasetController");
@@ -41,7 +43,9 @@ router.get("/:id/audit-logs", getAuditLogs);
 router.post("/:id/preview-excel", excelUpload, previewExcel);
 router.post("/:id/import-excel", excelUpload, importExcel);
 router.get("/:id/export-excel", exportExcel);
+router.patch("/:id/restore", requireRole(["Admin"]), restoreDataset);
+router.delete("/:id", requireRole(["Admin"]), softDeleteDataset);
 router.get("/:id", getDataset);
-router.post("/:id/fields", addField);
+router.post("/:id/fields", requireRole(["Admin"]), addField);
 
 module.exports = router;

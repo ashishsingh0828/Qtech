@@ -1,4 +1,16 @@
 const pool = require("../config/db");
+const { canonicalRole } = require("../middleware/auth");
+
+let archiveColumnReady = null;
+
+function ensureArchiveColumn() {
+  if (!archiveColumnReady) {
+    archiveColumnReady = pool.query(
+      "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"
+    );
+  }
+  return archiveColumnReady;
+}
 
 const FIELD_TYPES = new Set(["text", "number", "date", "boolean", "email"]);
 
@@ -12,26 +24,42 @@ function normalizeFieldKey(value) {
 }
 
 const getDatasets = async (req, res) => {
+  const includeDeleted = String(req.query.include_deleted || "").toLowerCase() === "true";
+
+  if (includeDeleted && canonicalRole(req.user?.role) !== "Admin") {
+    return res.status(403).json({ error: "Only an Admin can view archived datasets" });
+  }
+
   try {
-    const result = await pool.query(`
+    await ensureArchiveColumn();
+
+    const result = await pool.query(
+      `
       SELECT
         d.id,
         d.name,
         d.description,
         d.created_by,
-        u.name AS created_by_name,
+        creator.name AS created_by_name,
         d.created_at,
         d.updated_at,
+        d.is_deleted,
+        d.deleted_at,
+        d.updated_at AS last_modified_at,
+        COALESCE(editor.name, creator.name) AS last_modified_by,
         COUNT(f.id)::int AS fields_count
       FROM datasets d
-      LEFT JOIN users u ON u.id = d.created_by
+      LEFT JOIN users creator ON creator.id = d.created_by
+      LEFT JOIN users editor ON editor.id = d.updated_by
       LEFT JOIN fields f
         ON f.dataset_id = d.id
        AND f.is_deleted = FALSE
-      WHERE d.is_deleted = FALSE
-      GROUP BY d.id, u.name
-      ORDER BY d.created_at DESC
-    `);
+      WHERE ($1::boolean = TRUE OR d.is_deleted = FALSE)
+      GROUP BY d.id, creator.name, editor.name
+      ORDER BY d.updated_at DESC, d.id DESC
+      `,
+      [includeDeleted]
+    );
 
     res.json({ datasets: result.rows });
   } catch (error) {
@@ -464,6 +492,76 @@ const createRecord = async (req, res) => {
   }
 };
 
+const softDeleteDataset = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const actorId = Number(req.user?.id);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  try {
+    await ensureArchiveColumn();
+
+    const result = await pool.query(
+      `
+      UPDATE datasets
+      SET is_deleted = TRUE,
+          deleted_at = NOW(),
+          updated_at = CURRENT_TIMESTAMP,
+          updated_by = $2
+      WHERE id = $1 AND is_deleted = FALSE
+      RETURNING id, name, is_deleted, deleted_at, updated_at
+      `,
+      [datasetId, Number.isInteger(actorId) ? actorId : null]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    res.json({ success: true, dataset: result.rows[0] });
+  } catch (error) {
+    console.error("Soft delete dataset error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const restoreDataset = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const actorId = Number(req.user?.id);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  try {
+    await ensureArchiveColumn();
+
+    const result = await pool.query(
+      `
+      UPDATE datasets
+      SET is_deleted = FALSE,
+          deleted_at = NULL,
+          updated_at = CURRENT_TIMESTAMP,
+          updated_by = $2
+      WHERE id = $1 AND is_deleted = TRUE
+      RETURNING id, name, is_deleted, deleted_at, updated_at
+      `,
+      [datasetId, Number.isInteger(actorId) ? actorId : null]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Archived dataset not found" });
+    }
+
+    res.json({ success: true, dataset: result.rows[0] });
+  } catch (error) {
+    console.error("Restore dataset error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 const deleteRecord = async (req, res) => {
   const datasetId = Number(req.params.id);
   const recordId = Number(req.params.recordId);
@@ -705,6 +803,8 @@ module.exports = {
   getRecords,
   createRecord,
   deleteRecord,
+  softDeleteDataset,
+  restoreDataset,
   updateCell,
   getAuditLogs,
   normalizeFieldKey,

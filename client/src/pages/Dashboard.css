@@ -230,6 +230,29 @@
   background: #d7efe9;
 }
 
+.delete-row {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #f0c4bb;
+  border-radius: 8px;
+  background: #fdf1ee;
+  color: #8d3326;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.delete-row:hover:not(:disabled) {
+  background: #f8e4df;
+}
+
+.delete-row:disabled,
+.row-action:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -346,9 +369,65 @@
 }
 
 .row-action:focus-visible,
-.icon-button:focus-visible {
+.icon-button:focus-visible,
+.role-select:focus-visible {
   outline: 2px solid #0e6e62;
   outline-offset: 2px;
+}
+
+.header-actions,
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.row-action,
+.delete-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-modal {
+  width: min(720px, 100%);
+}
+
+.admin-table-wrap {
+  margin: 16px 0 0;
+}
+
+.admin-modal .page-error,
+.admin-modal .page-message,
+.confirm-modal .confirm-copy {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.role-select {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #ddd4c6;
+  border-radius: 8px;
+  background: #fff;
+  color: #102033;
+  font: inherit;
+  font-size: 14px;
+}
+
+.confirm-modal h2 {
+  margin-bottom: 8px;
+}
+
+.confirm-copy {
+  margin: 8px 0 0;
+  color: #5d6b7c;
+  font-size: 15px;
+}
+
+.confirm-modal .modal-actions {
+  margin-top: 20px;
 }
 
 .logout-button:focus-visible,
@@ -361,6 +440,7 @@
   .dashboard-header,
   .dataset-card-head,
   .header-user,
+  .header-actions,
   .user-meta {
     flex-direction: column;
     align-items: flex-start;
