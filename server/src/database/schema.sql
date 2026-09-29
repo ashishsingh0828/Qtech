@@ -180,6 +180,9 @@ ON record_values(record_id);
 CREATE INDEX idx_record_values_field_id
 ON record_values(field_id);
 
+CREATE INDEX idx_record_values_lookup
+ON record_values(record_id, field_id);
+
 CREATE INDEX idx_audit_logs_changed_by
 ON audit_logs(changed_by);
 
@@ -188,6 +191,9 @@ ON audit_logs(record_id);
 
 CREATE INDEX idx_audit_logs_field_id
 ON audit_logs(field_id);
+
+CREATE INDEX idx_audit_logs_record_field
+ON audit_logs(record_id, field_id);
 
 CREATE INDEX idx_uploaded_files_dataset_id
 ON uploaded_files(dataset_id);

@@ -38,6 +38,10 @@ async function applySchema() {
     CREATE INDEX IF NOT EXISTS idx_field_permissions_field_id
     ON field_permissions(field_id)
   `);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_records_dataset_id ON records(dataset_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_record_values_lookup ON record_values(record_id, field_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_fields_dataset_id ON fields(dataset_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_audit_logs_record_field ON audit_logs(record_id, field_id)");
 }
 
 module.exports = { ensureSchema };

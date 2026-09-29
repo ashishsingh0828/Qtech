@@ -19,6 +19,19 @@ function isAdmin(user) {
   return canonicalRole(user?.role) === "Admin";
 }
 
+function parseAggregatedValues(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" ? value : {};
+}
+
 async function listAccessibleFields(datasetId, user) {
   await ensureSchema();
   const admin = isAdmin(user);
@@ -402,53 +415,43 @@ const getRecords = async (req, res) => {
 
     const recordsResult = await pool.query(
       `
-      SELECT id, position, created_at
-      FROM records
-      WHERE dataset_id = $1 AND is_deleted = FALSE
-      ORDER BY position ASC NULLS LAST, created_at ASC, id ASC
-      `,
-      [datasetId]
-    );
-
-    const valuesResult = await pool.query(
-      `
-      SELECT rv.record_id, f.field_key, rv.value
-      FROM record_values rv
-      JOIN records r ON r.id = rv.record_id
-      JOIN fields f ON f.id = rv.field_id
+      SELECT
+        r.id,
+        r.position,
+        r.created_at,
+        COALESCE(
+          json_object_agg(f.field_key, rv.value) FILTER (WHERE f.field_key IS NOT NULL),
+          '{}'::json
+        ) AS values
+      FROM records r
+      LEFT JOIN record_values rv ON rv.record_id = r.id
+      LEFT JOIN fields f
+        ON f.id = rv.field_id
+       AND f.is_deleted = FALSE
+       AND (
+         $2::boolean
+         OR NOT EXISTS (
+           SELECT 1
+           FROM field_permissions fp
+           WHERE fp.field_id = f.id
+             AND fp.user_id = $3
+             AND fp.can_view = FALSE
+         )
+       )
       WHERE r.dataset_id = $1
         AND r.is_deleted = FALSE
-        AND f.dataset_id = $1
-        AND f.is_deleted = FALSE
-        AND (
-          $2::boolean
-          OR NOT EXISTS (
-            SELECT 1
-            FROM field_permissions fp
-            WHERE fp.field_id = f.id
-              AND fp.user_id = $3
-              AND fp.can_view = FALSE
-          )
-        )
+      GROUP BY r.id, r.position, r.created_at
+      ORDER BY r.position ASC NULLS LAST, r.created_at ASC, r.id ASC
       `,
       [datasetId, admin, userId]
     );
-
-    const valuesByRecord = new Map();
-
-    for (const row of valuesResult.rows) {
-      if (!valuesByRecord.has(row.record_id)) {
-        valuesByRecord.set(row.record_id, {});
-      }
-      valuesByRecord.get(row.record_id)[row.field_key] = row.value;
-    }
 
     res.json({
       records: recordsResult.rows.map((record) => ({
         id: record.id,
         position: record.position,
         created_at: record.created_at,
-        values: valuesByRecord.get(record.id) || {},
+        values: parseAggregatedValues(record.values),
       })),
     });
   } catch (error) {

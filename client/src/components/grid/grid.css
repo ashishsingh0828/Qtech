@@ -247,6 +247,11 @@
   white-space: nowrap;
 }
 
+.grid-table tbody tr {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 40px;
+}
+
 .grid-table thead th {
   position: sticky;
   top: 0;

@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Download, Filter, History, Plus, Search, Shield, Upload, X } from "lucide-react";
 import "./grid.css";
 
@@ -29,6 +30,21 @@ function GridToolbar({
   canManagePermissions,
   filterRef,
 }) {
+  const [searchText, setSearchText] = useState(query);
+  const searchTimer = useRef(null);
+
+  function changeSearch(next) {
+    setSearchText(next);
+    window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => onQueryChange(next), 180);
+  }
+
+  function clearSearch() {
+    setSearchText("");
+    window.clearTimeout(searchTimer.current);
+    onQueryChange("");
+  }
+
   return (
     <div className="grid-toolbar">
       <div className="toolbar-title">
@@ -40,13 +56,13 @@ function GridToolbar({
           <Search size={16} aria-hidden="true" />
           <input
             type="text"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
+            value={searchText}
+            onChange={(event) => changeSearch(event.target.value)}
             placeholder="Search rows"
             aria-label="Search rows"
           />
-          {query ? (
-            <button className="icon-clear" type="button" aria-label="Clear search" onClick={() => onQueryChange("")}>
+          {searchText ? (
+            <button className="icon-clear" type="button" aria-label="Clear search" onClick={clearSearch}>
               <X size={14} />
             </button>
           ) : null}

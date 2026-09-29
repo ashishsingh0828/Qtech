@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -89,6 +89,127 @@ function Editor({ field, value, onCommit, onCancel }) {
   );
 }
 
+function fieldSize(columnWidths, fieldId) {
+  const width = columnWidths[fieldId];
+  if (width) return { width, minWidth: width };
+  return { minWidth: 160 };
+}
+
+function cellKeyFieldId(key, recordId) {
+  const marker = `${recordId}:`;
+  if (!key || !key.startsWith(marker)) return null;
+  const fieldId = Number(key.slice(marker.length));
+  return Number.isInteger(fieldId) ? fieldId : null;
+}
+
+const SheetRow = memo(function SheetRow({
+  record,
+  rowIndex,
+  fields,
+  columnWidths,
+  selectedFieldIndex,
+  editing,
+  checked,
+  menuOpen,
+  pulseFieldId,
+  errorFieldId,
+  errorMessage,
+  onSelectCell,
+  onEditCell,
+  onToggleChecked,
+  onToggleMenu,
+  onInsertRow,
+  onDeleteRow,
+  onCommit,
+}) {
+  return (
+    <tr className="grid-row">
+      <td className="row-num">
+        <label className="row-check">
+          <input
+            type="checkbox"
+            checked={checked}
+            aria-label={`Select row ${rowIndex + 1}`}
+            onChange={() => onToggleChecked(record.id)}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </label>
+        <button
+          className="row-menu-btn"
+          type="button"
+          aria-label={`Row actions for ${rowIndex + 1}`}
+          aria-expanded={menuOpen}
+          onClick={() => onToggleMenu(record.id)}
+        >
+          <ChevronDown size={14} />
+        </button>
+        {rowIndex + 1}
+        {menuOpen ? (
+          <div className="row-menu" data-grid-menu role="menu">
+            <button className="menu-item" type="button" onClick={() => onInsertRow(record, "above")}>
+              Insert row above
+            </button>
+            <button className="menu-item" type="button" onClick={() => onInsertRow(record, "below")}>
+              Insert row below
+            </button>
+          </div>
+        ) : null}
+      </td>
+      {fields.map((field, fieldIndex) => {
+        const locked = !canEditField(field);
+        const isSelected = selectedFieldIndex === fieldIndex;
+        const isEditing = isSelected && editing && !locked;
+        const shown = cellText(field, record.values?.[field.field_key]);
+        const tone = statusTone(shown);
+        const className = [
+          "grid-cell",
+          isSelected ? "is-selected" : "",
+          isEditing ? "is-editing" : "",
+          locked ? "is-locked" : "",
+          pulseFieldId === field.id ? "cell-saved-pulse" : "",
+        ].filter(Boolean).join(" ");
+        return (
+          <td
+            key={field.id}
+            className={className}
+            style={fieldSize(columnWidths, field.id)}
+            onClick={() => onSelectCell(record.id, fieldIndex)}
+            onDoubleClick={() => {
+              if (locked) return;
+              onEditCell(record.id, fieldIndex);
+            }}
+          >
+            {isEditing ? (
+              <Editor
+                field={field}
+                value={record.values?.[field.field_key]}
+                onCancel={() => onSelectCell(record.id, fieldIndex)}
+                onCommit={(draft, move) => onCommit(record, field, fieldIndex, draft, move)}
+              />
+            ) : (
+              <div className="cell-line">
+                {tone ? (
+                  <span className={`status-pill status-${tone}`} title={shown}>{shown}</span>
+                ) : (
+                  <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
+                )}
+                {locked ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
+                {errorFieldId === field.id ? <span className="cell-error">{errorMessage}</span> : null}
+              </div>
+            )}
+          </td>
+        );
+      })}
+      <td className="actions-cell">
+        <button className="delete-link" type="button" onClick={() => onDeleteRow(record)}>
+          <Trash2 size={13} aria-hidden="true" />
+          Delete
+        </button>
+      </td>
+    </tr>
+  );
+});
+
 function SpreadsheetWorkspace({
   fields,
   records,
@@ -117,6 +238,7 @@ function SpreadsheetWorkspace({
   const [columnWidths, setColumnWidths] = useState({});
   const gridRef = useRef(null);
   const scrollPos = useRef({ top: 0, left: 0 });
+  const actionRef = useRef({});
 
   const needle = query.trim().toLowerCase();
   const activeFilters = (filters || []).filter((filter) => filter.fieldId && String(filter.value || "").trim());
@@ -192,11 +314,40 @@ function SpreadsheetWorkspace({
     window.addEventListener("mouseup", onUp);
   }
 
-  function toggleChecked(recordId) {
+  const selectCell = useCallback((recordId, fieldIndex) => {
+    setSelection({ recordId, fieldIndex });
+    setEditing(false);
+    gridRef.current?.focus();
+  }, []);
+
+  const editCell = useCallback((recordId, fieldIndex) => {
+    setSelection({ recordId, fieldIndex });
+    setEditing(true);
+  }, []);
+
+  const toggleChecked = useCallback((recordId) => {
     setCheckedIds((current) => (
       current.includes(recordId) ? current.filter((id) => id !== recordId) : [...current, recordId]
     ));
-  }
+  }, []);
+
+  const toggleRowMenu = useCallback((recordId) => {
+    setColumnMenu(null);
+    setRowMenu((current) => (current === recordId ? null : recordId));
+  }, []);
+
+  const insertRelative = useCallback((record, placement) => {
+    setRowMenu(null);
+    actionRef.current.onInsertRow(record, placement);
+  }, []);
+
+  const deleteOne = useCallback((record) => {
+    actionRef.current.onDeleteRow(record);
+  }, []);
+
+  const commitCell = useCallback((record, field, fieldIndex, draft, move) => {
+    return actionRef.current.commit(record, field, fieldIndex, draft, move);
+  }, []);
 
   function toggleAllVisible() {
     const visibleIds = viewRecords.map((record) => record.id);
@@ -281,6 +432,14 @@ function SpreadsheetWorkspace({
     if (move) moveSelection(move);
     return true;
   }
+
+  useEffect(() => {
+    actionRef.current = {
+      onInsertRow,
+      onDeleteRow,
+      commit: commitEditor,
+    };
+  });
 
   const selectedRecord = selection ? viewRecords.find((record) => record.id === selection.recordId) : null;
   const selectedField = selection ? fields[selection.fieldIndex] : null;
@@ -420,102 +579,32 @@ function SpreadsheetWorkspace({
                 </tr>
               ) : null}
               {!loading
-                ? viewRecords.map((record, rowIndex) => (
-                    <tr key={record.id}>
-                      <td className="row-num">
-                        <label className="row-check">
-                          <input
-                            type="checkbox"
-                            checked={checkedIds.includes(record.id)}
-                            aria-label={`Select row ${rowIndex + 1}`}
-                            onChange={() => toggleChecked(record.id)}
-                            onClick={(event) => event.stopPropagation()}
-                          />
-                        </label>
-                        <button
-                          className="row-menu-btn"
-                          type="button"
-                          aria-label={`Row actions for ${rowIndex + 1}`}
-                          aria-expanded={rowMenu === record.id}
-                          onClick={() => {
-                            setColumnMenu(null);
-                            setRowMenu((current) => (current === record.id ? null : record.id));
-                          }}
-                        >
-                          <ChevronDown size={14} />
-                        </button>
-                        {rowIndex + 1}
-                        {rowMenu === record.id ? (
-                          <div className="row-menu" data-grid-menu role="menu">
-                            <button className="menu-item" type="button" onClick={() => { setRowMenu(null); onInsertRow(record, "above"); }}>
-                              Insert row above
-                            </button>
-                            <button className="menu-item" type="button" onClick={() => { setRowMenu(null); onInsertRow(record, "below"); }}>
-                              Insert row below
-                            </button>
-                          </div>
-                        ) : null}
-                      </td>
-                      {fields.map((field, fieldIndex) => {
-                        const locked = !canEditField(field);
-                        const isSelected = selection?.recordId === record.id && selection?.fieldIndex === fieldIndex;
-                        const isEditing = isSelected && editing && !locked;
-                        const shown = cellText(field, record.values?.[field.field_key]);
-                        const tone = statusTone(shown);
-                        const className = [
-                          "grid-cell",
-                          isSelected ? "is-selected" : "",
-                          isEditing ? "is-editing" : "",
-                          locked ? "is-locked" : "",
-                          savedPulseKey === `${record.id}:${field.id}` ? "cell-saved-pulse" : "",
-                        ].filter(Boolean).join(" ");
-                        return (
-                          <td
-                            key={field.id}
-                            className={className}
-                            style={columnSize(field.id)}
-                            onClick={() => {
-                              setSelection({ recordId: record.id, fieldIndex });
-                              setEditing(false);
-                              gridRef.current?.focus();
-                            }}
-                            onDoubleClick={() => {
-                              if (locked) return;
-                              setSelection({ recordId: record.id, fieldIndex });
-                              setEditing(true);
-                            }}
-                          >
-                            {isEditing ? (
-                              <Editor
-                                field={field}
-                                value={record.values?.[field.field_key]}
-                                onCancel={() => setEditing(false)}
-                                onCommit={(draft, move) => commitEditor(record, field, fieldIndex, draft, move)}
-                              />
-                            ) : (
-                              <div className="cell-line">
-                                {tone ? (
-                                  <span className={`status-pill status-${tone}`} title={shown}>{shown}</span>
-                                ) : (
-                                  <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
-                                )}
-                                {locked ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
-                                {cellError?.key === `${record.id}:${field.id}` ? (
-                                  <span className="cell-error">{cellError.message}</span>
-                                ) : null}
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className="actions-cell">
-                        <button className="delete-link" type="button" onClick={() => onDeleteRow(record)}>
-                          <Trash2 size={13} aria-hidden="true" />
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                ? viewRecords.map((record, rowIndex) => {
+                    const errorFieldId = cellKeyFieldId(cellError?.key, record.id);
+                    return (
+                    <SheetRow
+                      key={record.id}
+                      record={record}
+                      rowIndex={rowIndex}
+                      fields={fields}
+                      columnWidths={columnWidths}
+                      selectedFieldIndex={selection?.recordId === record.id ? selection.fieldIndex : -1}
+                      editing={Boolean(editing && selection?.recordId === record.id)}
+                      checked={checkedIds.includes(record.id)}
+                      menuOpen={rowMenu === record.id}
+                      pulseFieldId={cellKeyFieldId(savedPulseKey, record.id)}
+                      errorFieldId={errorFieldId}
+                      errorMessage={errorFieldId != null ? cellError.message : ""}
+                      onSelectCell={selectCell}
+                      onEditCell={editCell}
+                      onToggleChecked={toggleChecked}
+                      onToggleMenu={toggleRowMenu}
+                      onInsertRow={insertRelative}
+                      onDeleteRow={deleteOne}
+                      onCommit={commitCell}
+                    />
+                    );
+                  })
                 : null}
             </tbody>
           </table>

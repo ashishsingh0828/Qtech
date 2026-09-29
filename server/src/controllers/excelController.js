@@ -3,8 +3,8 @@ const XLSX = require("xlsx");
 const { normalizeFieldKey, normalizeCellValue, listAccessibleFields } = require("./datasetController");
 const { ensureSchema } = require("../database/ensure");
 
-const RECORD_BATCH = 400;
-const VALUE_BATCH = 1500;
+const RECORD_BATCH = 1000;
+const VALUE_BATCH = 1000;
 
 function cellToString(value) {
   if (value == null || value === "") return "";
@@ -140,12 +140,6 @@ function storedValue(field, raw) {
   const normalized = normalizeCellValue(field, raw);
   if (normalized == null || normalized === "") return String(raw).trim();
   return normalized;
-}
-
-async function insertRows(client, sql, params) {
-  if (!params.length) return [];
-  const result = await client.query(sql, params);
-  return result.rows;
 }
 
 async function loadDatasetFields(datasetId) {
@@ -317,56 +311,54 @@ const importExcel = async (req, res) => {
     const recordIds = [];
 
     for (let offset = 0; offset < rows.length; offset += RECORD_BATCH) {
-      const slice = rows.slice(offset, offset + RECORD_BATCH);
-      const params = [];
-      const placeholders = slice.map((_, index) => {
-        const position = nextRowPosition + index;
-        const base = index * 3;
-        params.push(datasetId, createdBy, position);
-        return `($${base + 1}, $${base + 2}, $${base + 2}, $${base + 3})`;
-      });
-      const inserted = await insertRows(
-        client,
+      const count = Math.min(RECORD_BATCH, rows.length - offset);
+      const positions = Array.from({ length: count }, (_, index) => nextRowPosition + index);
+      const inserted = await client.query(
         `
         INSERT INTO records (dataset_id, created_by, updated_by, position)
-        VALUES ${placeholders.join(", ")}
+        SELECT $1::int, $2::int, $2::int, pos
+        FROM UNNEST($3::int[]) AS pos
         RETURNING id, position
         `,
-        params
+        [datasetId, createdBy, positions]
       );
-      inserted.sort((left, right) => Number(left.position) - Number(right.position));
-      if (inserted.length !== slice.length) {
+      const created = inserted.rows.sort((left, right) => Number(left.position) - Number(right.position));
+      if (created.length !== count) {
         await client.query("ROLLBACK");
         return res.status(500).json({ error: "Unable to insert every spreadsheet row" });
       }
-      for (const record of inserted) recordIds.push(record.id);
-      nextRowPosition += slice.length;
+      for (const record of created) recordIds.push(record.id);
+      nextRowPosition += count;
     }
 
-    const cells = [];
+    const valueRecordIds = [];
+    const valueFieldIds = [];
+    const valueTexts = [];
     rows.forEach((row, rowIndex) => {
       const recordId = recordIds[rowIndex];
       mapped.forEach((field, columnIndex) => {
         const value = storedValue(field, row[columnIndex]);
         if (!value) return;
-        cells.push({ recordId, fieldId: field.id, value });
+        valueRecordIds.push(recordId);
+        valueFieldIds.push(field.id);
+        valueTexts.push(value);
       });
     });
 
-    for (let offset = 0; offset < cells.length; offset += VALUE_BATCH) {
-      const slice = cells.slice(offset, offset + VALUE_BATCH);
-      const params = [];
-      const placeholders = slice.map((cell, index) => {
-        const base = index * 4;
-        params.push(cell.recordId, cell.fieldId, cell.value, createdBy);
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
-      });
+    for (let offset = 0; offset < valueTexts.length; offset += VALUE_BATCH) {
+      const end = offset + VALUE_BATCH;
       await client.query(
         `
         INSERT INTO record_values (record_id, field_id, value, updated_by)
-        VALUES ${placeholders.join(", ")}
+        SELECT rec, fld, val, $4::int
+        FROM UNNEST($1::int[], $2::int[], $3::text[]) AS input(rec, fld, val)
         `,
-        params
+        [
+          valueRecordIds.slice(offset, end),
+          valueFieldIds.slice(offset, end),
+          valueTexts.slice(offset, end),
+          createdBy,
+        ]
       );
     }
 
