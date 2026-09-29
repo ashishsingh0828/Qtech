@@ -194,9 +194,138 @@
   outline: none;
 }
 
+.editable-cell {
+  min-width: 140px;
+}
+
+.cell-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.cell-empty {
+  color: #9aa6b2;
+}
+
+.cell-edit {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #6d7b8c;
+  cursor: pointer;
+}
+
+.cell-edit:hover,
+.editable-cell:hover .cell-edit {
+  background: #f4f1ea;
+  color: #102033;
+}
+
+.cell-input {
+  width: 100%;
+  min-width: 120px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #0e6e62;
+  border-radius: 8px;
+  background: #fff;
+  color: #102033;
+  font: inherit;
+  font-size: 14px;
+}
+
+.cell-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(14, 110, 98, 0.16);
+}
+
+.cell-status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cell-saving .cell-status {
+  color: #8a5a12;
+}
+
+.cell-saved {
+  background: #e5f4f1;
+}
+
+.cell-saved .cell-status {
+  color: #0a534a;
+}
+
+.cell-error .cell-status {
+  color: #8d3326;
+  white-space: normal;
+}
+
+.audit-section {
+  border-top: 1px solid #e6dfd2;
+  padding: 8px 0 20px;
+}
+
+.audit-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 28px 0;
+}
+
+.audit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #102033;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+}
+
+.chevron {
+  transition: transform 0.15s ease;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.audit-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-table-wrap {
+  margin-top: 12px;
+}
+
+.cell-edit:focus-visible,
+.audit-toggle:focus-visible {
+  outline: 2px solid #0e6e62;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 @media (max-width: 760px) {
   .sheet-toolbar,
-  .sheet-tools {
+  .sheet-tools,
+  .audit-heading {
     flex-direction: column;
     align-items: stretch;
   }

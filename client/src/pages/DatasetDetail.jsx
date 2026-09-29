@@ -1,7 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { ArrowLeft, Database, LogOut, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Database,
+  LogOut,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import "./Dashboard.css";
 import "./DatasetDetail.css";
 
@@ -72,6 +83,168 @@ function cellText(field, value) {
   return String(value);
 }
 
+function formatTimestamp(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function auditValue(value) {
+  if (value == null || value === "") return "empty";
+  if (value === "true") return "Yes";
+  if (value === "false") return "No";
+  return String(value);
+}
+
+function draftFromValue(field, value) {
+  if (field.field_type === "boolean") {
+    if (value === true || value === "true") return "true";
+    if (value === false || value === "false") return "false";
+    return "";
+  }
+  return value == null ? "" : String(value);
+}
+
+function draftsMatch(field, value, draft) {
+  return draftFromValue(field, value) === String(draft ?? "");
+}
+
+function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthorized }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState("");
+  const [statusText, setStatusText] = useState("");
+  const skipCommit = useRef(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      if (typeof inputRef.current.select === "function" && field.field_type !== "date") {
+        inputRef.current.select();
+      }
+    }
+  }, [editing, field.field_type]);
+
+  function beginEdit() {
+    skipCommit.current = false;
+    setDraft(draftFromValue(field, value));
+    setStatus("");
+    setStatusText("");
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    skipCommit.current = true;
+    setEditing(false);
+  }
+
+  async function commitEdit() {
+    if (skipCommit.current) {
+      skipCommit.current = false;
+      return;
+    }
+
+    setEditing(false);
+
+    if (draftsMatch(field, value, draft)) {
+      return;
+    }
+
+    const nextValue =
+      field.field_type === "boolean" ? (draft === "" ? "" : draft === "true") : draft;
+    setStatus("saving");
+    setStatusText("Saving…");
+
+    try {
+      const { data } = await axios.patch(
+        `${API_BASE}/api/datasets/${datasetId}/records/${recordId}/cells`,
+        { field_id: field.id, value: nextValue },
+        authConfig()
+      );
+      onSaved(recordId, field.field_key, data.updated?.value ?? nextValue);
+      setStatus("saved");
+      setStatusText("Saved");
+      window.setTimeout(() => {
+        setStatus((current) => (current === "saved" ? "" : current));
+      }, 1200);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      setStatus("error");
+      setStatusText(errorMessage(err, "Unable to save this cell."));
+    }
+  }
+
+  function onKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.currentTarget.blur();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEdit();
+    }
+  }
+
+  const shown = cellText(field, value);
+
+  return (
+    <td className={`editable-cell ${status ? `cell-${status}` : ""}`}>
+      {editing ? (
+        field.field_type === "boolean" ? (
+          <select
+            ref={inputRef}
+            className="cell-input"
+            value={draft}
+            aria-label={field.name}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={onKeyDown}
+          >
+            <option value="">—</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        ) : (
+          <input
+            ref={inputRef}
+            className="cell-input"
+            type={inputTypeFor(field.field_type)}
+            value={draft}
+            aria-label={field.name}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={onKeyDown}
+          />
+        )
+      ) : (
+        <div className="cell-display" onDoubleClick={beginEdit}>
+          <span className={shown ? undefined : "cell-empty"}>{shown || "—"}</span>
+          <button
+            className="cell-edit"
+            type="button"
+            aria-label={`Edit ${field.name}`}
+            onClick={beginEdit}
+          >
+            <Pencil size={13} aria-hidden="true" />
+          </button>
+          {statusText ? <span className="cell-status">{statusText}</span> : null}
+        </div>
+      )}
+    </td>
+  );
+}
+
 function DatasetDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -106,6 +279,10 @@ function DatasetDetail() {
   const [rowSubmitting, setRowSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -167,6 +344,57 @@ function DatasetDetail() {
   function handleLogout() {
     localStorage.clear();
     navigate("/login");
+  }
+
+  function leaveForLogin() {
+    localStorage.clear();
+    navigate("/login");
+  }
+
+  async function loadLogs() {
+    setLogsLoading(true);
+    setLogsError("");
+
+    try {
+      const { data } = await axios.get(`${API_BASE}/api/datasets/${id}/audit-logs`, authConfig());
+      setLogs(Array.isArray(data) ? data : data.logs || []);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        leaveForLogin();
+        return;
+      }
+      setLogsError(errorMessage(err, "Unable to load the activity log."));
+    } finally {
+      setLogsLoading(false);
+    }
+  }
+
+  function toggleLogs() {
+    const next = !logsOpen;
+    setLogsOpen(next);
+    if (next) {
+      loadLogs();
+    }
+  }
+
+  function handleCellSaved(recordId, fieldKeyName, nextValue) {
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === recordId
+          ? {
+              ...record,
+              values: {
+                ...record.values,
+                [fieldKeyName]: nextValue,
+              },
+            }
+          : record
+      )
+    );
+
+    if (logsOpen) {
+      loadLogs();
+    }
   }
 
   function openModal() {
@@ -466,7 +694,15 @@ function DatasetDetail() {
                       {filteredRecords.map((record) => (
                         <tr key={record.id}>
                           {fields.map((field) => (
-                            <td key={field.id}>{cellText(field, record.values?.[field.field_key])}</td>
+                            <EditableCell
+                              key={field.id}
+                              field={field}
+                              value={record.values?.[field.field_key]}
+                              recordId={record.id}
+                              datasetId={id}
+                              onSaved={handleCellSaved}
+                              onUnauthorized={leaveForLogin}
+                            />
                           ))}
                           <td className="actions-col">
                             <button
@@ -485,6 +721,77 @@ function DatasetDetail() {
                 </div>
               ) : null}
             </div>
+          ) : null}
+
+          {dataset ? (
+            <section className="audit-section">
+              <div className="audit-heading">
+                <button
+                  className="audit-toggle"
+                  type="button"
+                  aria-expanded={logsOpen}
+                  onClick={toggleLogs}
+                >
+                  <ChevronDown size={16} className={logsOpen ? "chevron open" : "chevron"} />
+                  Audit Trail / Activity Log
+                </button>
+                {logsOpen ? (
+                  <button
+                    className="logout-button"
+                    type="button"
+                    onClick={loadLogs}
+                    disabled={logsLoading}
+                  >
+                    <RefreshCw size={14} aria-hidden="true" />
+                    Refresh Logs
+                  </button>
+                ) : null}
+              </div>
+
+              {logsOpen ? (
+                <div className="audit-body">
+                  {logsError ? (
+                    <p className="page-error" role="alert">
+                      {logsError}
+                    </p>
+                  ) : null}
+                  {logsLoading ? <p className="page-message">Loading activity…</p> : null}
+                  {!logsLoading && !logsError && logs.length === 0 ? (
+                    <p className="page-message">No cell changes have been recorded yet.</p>
+                  ) : null}
+                  {!logsLoading && logs.length > 0 ? (
+                    <div className="dataset-table-wrap audit-table-wrap">
+                      <table className="dataset-table">
+                        <thead>
+                          <tr>
+                            <th>Timestamp</th>
+                            <th>User Name</th>
+                            <th>Field Name</th>
+                            <th>Change</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {logs.map((entry) => (
+                            <tr key={entry.id}>
+                              <td>{formatTimestamp(entry.changed_at)}</td>
+                              <td>{entry.changed_by_name || "Unknown"}</td>
+                              <td>{entry.field_name || "Field"}</td>
+                              <td>
+                                <span className="audit-change">
+                                  <span>{auditValue(entry.old_value)}</span>
+                                  <span aria-hidden="true">→</span>
+                                  <span>{auditValue(entry.new_value)}</span>
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
           ) : null}
         </section>
       </main>

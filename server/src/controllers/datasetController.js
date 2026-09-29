@@ -240,16 +240,8 @@ const addField = async (req, res) => {
 function normalizeCellValue(field, raw) {
   if (field.field_type === "boolean") {
     if (raw === true || raw === "true" || raw === "Yes" || raw === "yes") return "true";
-    if (
-      raw === false ||
-      raw === "false" ||
-      raw === "No" ||
-      raw === "no" ||
-      raw == null ||
-      raw === ""
-    ) {
-      return "false";
-    }
+    if (raw === false || raw === "false" || raw === "No" || raw === "no") return "false";
+    if (raw == null || raw === "") return "";
     return null;
   }
 
@@ -502,6 +494,211 @@ const deleteRecord = async (req, res) => {
   }
 };
 
+const updateCell = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const recordId = Number(req.params.recordId);
+  const fieldId = Number(req.body?.field_id);
+  const changedBy = Number(req.user?.id);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0 || !Number.isInteger(recordId) || recordId <= 0) {
+    return res.status(400).json({ error: "Invalid record id" });
+  }
+
+  if (!Number.isInteger(fieldId) || fieldId <= 0) {
+    return res.status(400).json({ error: "field_id is required" });
+  }
+
+  if (!Number.isInteger(changedBy) || changedBy <= 0) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const recordResult = await client.query(
+      `
+      SELECT id
+      FROM records
+      WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
+      `,
+      [recordId, datasetId]
+    );
+
+    if (recordResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    const fieldResult = await client.query(
+      `
+      SELECT id, name, field_type, is_required
+      FROM fields
+      WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
+      `,
+      [fieldId, datasetId]
+    );
+
+    if (fieldResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Field not found" });
+    }
+
+    const field = fieldResult.rows[0];
+    const normalized = normalizeCellValue(field, req.body?.value);
+
+    if (normalized == null) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: `${field.name} has an invalid value` });
+    }
+
+    if (field.is_required && normalized === "") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: `${field.name} is required` });
+    }
+
+    const currentResult = await client.query(
+      `
+      SELECT id, value
+      FROM record_values
+      WHERE record_id = $1 AND field_id = $2
+      `,
+      [recordId, fieldId]
+    );
+
+    const current = currentResult.rows[0] || null;
+    const previous = current ? current.value : null;
+    const previousComparable = previous == null ? "" : String(previous);
+
+    if (previousComparable === normalized) {
+      await client.query("ROLLBACK");
+      return res.json({
+        success: true,
+        updated: {
+          field_id: fieldId,
+          value: previous == null ? normalized : previous,
+        },
+      });
+    }
+
+    if (current) {
+      await client.query(
+        `
+        UPDATE record_values
+        SET value = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        `,
+        [normalized, changedBy, current.id]
+      );
+    } else {
+      await client.query(
+        `
+        INSERT INTO record_values (record_id, field_id, value, updated_by)
+        VALUES ($1, $2, $3, $4)
+        `,
+        [recordId, fieldId, normalized, changedBy]
+      );
+    }
+
+    await client.query(
+      `
+      INSERT INTO audit_logs (
+        user_id,
+        dataset_id,
+        record_id,
+        field_id,
+        action,
+        old_value,
+        new_value,
+        created_at
+      )
+      VALUES ($1, $2, $3, $4, 'cell_update', $5, $6, NOW())
+      `,
+      [changedBy, datasetId, recordId, fieldId, previous, normalized]
+    );
+
+    await client.query(
+      `
+      UPDATE records
+      SET updated_by = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      `,
+      [changedBy, recordId]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      updated: {
+        field_id: fieldId,
+        value: normalized,
+      },
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback error:", rollbackError);
+    }
+
+    if (error.code === "23503") {
+      return res.status(400).json({ error: "Unable to save this cell" });
+    }
+
+    console.error("Update cell error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    client.release();
+  }
+};
+
+const getAuditLogs = async (req, res) => {
+  const datasetId = Number(req.params.id);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  try {
+    const datasetResult = await pool.query(
+      "SELECT id FROM datasets WHERE id = $1 AND is_deleted = FALSE",
+      [datasetId]
+    );
+
+    if (datasetResult.rows.length === 0) {
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        a.id,
+        a.record_id,
+        f.name AS field_name,
+        u.name AS changed_by_name,
+        a.old_value,
+        a.new_value,
+        a.created_at AS changed_at
+      FROM audit_logs a
+      JOIN records r ON r.id = a.record_id
+      LEFT JOIN users u ON u.id = a.user_id
+      LEFT JOIN fields f ON f.id = a.field_id
+      WHERE r.dataset_id = $1
+      ORDER BY a.created_at DESC
+      LIMIT 50
+      `,
+      [datasetId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Get audit logs error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 module.exports = {
   getDatasets,
   createDataset,
@@ -510,4 +707,6 @@ module.exports = {
   getRecords,
   createRecord,
   deleteRecord,
+  updateCell,
+  getAuditLogs,
 };
