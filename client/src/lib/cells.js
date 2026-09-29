@@ -38,9 +38,10 @@ export function draftsMatch(field, value, draft) {
 
 export function statusTone(value) {
   const key = String(value ?? "").trim().toLowerCase();
-  if (key === "active" || key === "expired" || key === "pending" || key === "completed" || key === "validated") {
-    return key;
-  }
+  if (key === "in warranty" || key === "amc" || key === "cmc" || key === "active") return "active";
+  if (key === "out of warranty" || key === "expired") return "expired";
+  if (key === "pending") return "pending";
+  if (key === "completed" || key === "validated" || key === "verified ok") return key === "verified ok" ? "active" : key;
   return "";
 }
 

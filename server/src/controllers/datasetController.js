@@ -1,6 +1,7 @@
 const pool = require("../config/db");
 const { canonicalRole } = require("../middleware/auth");
 const { ensureSchema } = require("../database/ensure");
+const { ensureMasterFields, MASTER_FIELDS } = require("../constants/masterFields");
 
 let archiveColumnReady = null;
 
@@ -177,12 +178,13 @@ const createDataset = async (req, res) => {
     );
 
     const creator = await pool.query("SELECT name FROM users WHERE id = $1", [createdBy]);
+    await ensureMasterFields(pool, result.rows[0].id);
 
     res.status(201).json({
       dataset: {
         ...result.rows[0],
         created_by_name: creator.rows[0]?.name || null,
-        fields_count: 0,
+        fields_count: MASTER_FIELDS.length,
         records_count: 0,
       },
     });
@@ -225,6 +227,7 @@ const getDataset = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
+    await ensureMasterFields(pool, id);
     const fields = await listAccessibleFields(id, req.user);
 
     res.json({

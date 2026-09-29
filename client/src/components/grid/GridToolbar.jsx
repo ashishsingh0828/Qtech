@@ -29,6 +29,8 @@ function GridToolbar({
   onPermissions,
   canManagePermissions,
   filterRef,
+  workflowTab,
+  onWorkflowTab,
 }) {
   const [searchText, setSearchText] = useState(query);
   const searchTimer = useRef(null);
@@ -153,6 +155,25 @@ function GridToolbar({
           </button>
         </div>
       ) : null}
+      <div className="workflow-tabs" role="tablist" aria-label="Record workflow">
+        {[
+          ["all", "All Records"],
+          ["validation", "Needs Validation"],
+          ["verification", "Needs Verification"],
+          ["followup", "Out of Warranty / Follow-up Due"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            className={workflowTab === id ? "workflow-tab is-active" : "workflow-tab"}
+            type="button"
+            role="tab"
+            aria-selected={workflowTab === id}
+            onClick={() => onWorkflowTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

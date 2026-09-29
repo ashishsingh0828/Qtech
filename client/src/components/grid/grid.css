@@ -315,6 +315,82 @@
   white-space: nowrap;
 }
 
+.workflow-tabs {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-tab {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workflow-tab.is-active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #312e81;
+}
+
+.workflow-action,
+.workflow-lock {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workflow-action {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workflow-action:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.workflow-lock {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.proposal-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.follow-input {
+  height: 28px;
+  max-width: 150px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 12px;
+}
+
 .filter-chips {
   display: flex;
   flex: 1 0 100%;

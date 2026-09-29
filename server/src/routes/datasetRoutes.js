@@ -18,6 +18,7 @@ const {
 } = require("../controllers/datasetController");
 const { getFieldPermissions, saveFieldPermissions } = require("../controllers/permissionController");
 const { previewExcel, importExcel, exportExcel } = require("../controllers/excelController");
+const { validateRecord, verifyRecord, updateProposal } = require("../controllers/workflowController");
 
 const router = express.Router();
 const upload = multer({
@@ -54,6 +55,9 @@ router.post("/", createDataset);
 router.get("/:id/records", getRecords);
 router.post("/:id/records", createRecord);
 router.delete("/:id/records/:recordId", deleteRecord);
+router.patch("/:id/records/:recordId/workflow/validate", validateRecord);
+router.patch("/:id/records/:recordId/workflow/verify", verifyRecord);
+router.patch("/:id/records/:recordId/workflow/proposal", updateProposal);
 router.patch("/:id/records/:recordId/cells", updateCell);
 router.get("/:id/audit-logs", getAuditLogs);
 router.get("/:id/permissions", requireRole(["Admin"]), getFieldPermissions);

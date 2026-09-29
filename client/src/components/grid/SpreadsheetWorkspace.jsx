@@ -18,6 +18,7 @@ import {
   typeLabel,
 } from "../../lib/cells";
 import { syncLabel } from "../../lib/session";
+import { isOutOfWarranty, isYes, matchesWorkflowTab, readField, workflowColumn } from "../../lib/workflow";
 import "./grid.css";
 
 function Editor({ field, value, onCommit, onCancel }) {
@@ -121,6 +122,11 @@ const SheetRow = memo(function SheetRow({
   onInsertRow,
   onDeleteRow,
   onCommit,
+  canVerify,
+  busyAction,
+  onValidate,
+  onVerify,
+  onProposal,
 }) {
   return (
     <tr className="grid-row">
@@ -158,9 +164,19 @@ const SheetRow = memo(function SheetRow({
       {fields.map((field, fieldIndex) => {
         const locked = !canEditField(field);
         const isSelected = selectedFieldIndex === fieldIndex;
-        const isEditing = isSelected && editing && !locked;
+        const columnKind = workflowColumn(field);
         const shown = cellText(field, record.values?.[field.field_key]);
         const tone = statusTone(shown);
+        const validated = isYes(readField(fields, record, "Validated"));
+        const validatedBy = readField(fields, record, "Validated By");
+        const verification = readField(fields, record, "Verification Status");
+        const verifiedBy = readField(fields, record, "Verified By");
+        const proposalSent = readField(fields, record, "Proposal Sent");
+        const statusValue = readField(fields, record, "Status");
+        const followUp = readField(fields, record, "Follow-up Date").slice(0, 10);
+        const outOfWarranty = isOutOfWarranty(statusValue);
+        const verified = verification.trim().toLowerCase() === "verified ok";
+        const isEditing = isSelected && editing && !locked && columnKind !== "validated" && columnKind !== "verification" && columnKind !== "proposal" && !(columnKind === "followup" && outOfWarranty);
         const className = [
           "grid-cell",
           isSelected ? "is-selected" : "",
@@ -175,7 +191,8 @@ const SheetRow = memo(function SheetRow({
             style={fieldSize(columnWidths, field.id)}
             onClick={() => onSelectCell(record.id, fieldIndex)}
             onDoubleClick={() => {
-              if (locked) return;
+              if (locked || columnKind === "validated" || columnKind === "verification" || columnKind === "proposal") return;
+              if (columnKind === "followup" && outOfWarranty) return;
               onEditCell(record.id, fieldIndex);
             }}
           >
@@ -188,12 +205,90 @@ const SheetRow = memo(function SheetRow({
               />
             ) : (
               <div className="cell-line">
-                {tone ? (
+                {columnKind === "validated" ? (
+                  validated ? (
+                    <span className="workflow-lock" title={validatedBy}>✓ Validated by {validatedBy || "user"}</span>
+                  ) : (
+                    <button
+                      className="workflow-action"
+                      type="button"
+                      disabled={busyAction === "validate"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onValidate(record);
+                      }}
+                    >
+                      {busyAction === "validate" ? "Saving…" : "Validate"}
+                    </button>
+                  )
+                ) : null}
+                {columnKind === "verification" ? (
+                  verified ? (
+                    <span className="workflow-lock">✓ Verified OK ({verifiedBy || "Manager"})</span>
+                  ) : validated && canVerify ? (
+                    <button
+                      className="workflow-action"
+                      type="button"
+                      disabled={busyAction === "verify"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onVerify(record);
+                      }}
+                    >
+                      {busyAction === "verify" ? "Saving…" : "Verify"}
+                    </button>
+                  ) : (
+                    <span className="status-pill status-pending">Pending</span>
+                  )
+                ) : null}
+                {columnKind === "proposal" ? (
+                  outOfWarranty ? (
+                    <span className="proposal-line">
+                      <span className={proposalSent.trim().toLowerCase() === "yes" ? "status-pill status-active" : proposalSent.trim().toLowerCase() === "na" ? "status-pill status-completed" : "status-pill status-pending"}>
+                        {proposalSent.trim().toLowerCase() === "yes" ? "Sent" : proposalSent.trim().toLowerCase() === "na" ? "NA" : "Pending"}
+                      </span>
+                      {proposalSent.trim().toLowerCase() !== "yes" ? (
+                        <button
+                          className="workflow-action"
+                          type="button"
+                          disabled={busyAction === "proposal"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onProposal(record, { proposalSent: "Yes" });
+                          }}
+                        >
+                          Mark sent
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <span className={shown ? "cell-clip" : "cell-empty cell-clip"}>{shown || "—"}</span>
+                  )
+                ) : null}
+                {columnKind === "followup" && outOfWarranty ? (
+                  <input
+                    className="follow-input"
+                    type="date"
+                    aria-label="Follow-up date"
+                    value={/^\d{4}-\d{2}-\d{2}$/.test(followUp) ? followUp : ""}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => onProposal(record, { followUpDate: event.target.value })}
+                  />
+                ) : null}
+                {columnKind === "status" && tone ? (
                   <span className={`status-pill status-${tone}`} title={shown}>{shown}</span>
-                ) : (
+                ) : null}
+                {columnKind === "status" && !tone ? (
                   <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
-                )}
-                {locked ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
+                ) : null}
+                {!columnKind || (columnKind === "followup" && !outOfWarranty) ? (
+                  tone ? (
+                    <span className={`status-pill status-${tone}`} title={shown}>{shown}</span>
+                  ) : (
+                    <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
+                  )
+                ) : null}
+                {locked && columnKind !== "verification" ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
                 {errorFieldId === field.id ? <span className="cell-error">{errorMessage}</span> : null}
               </div>
             )}
@@ -222,6 +317,12 @@ function SpreadsheetWorkspace({
   onDeleteRows,
   onInsertColumn,
   onDeleteColumn,
+  onValidate,
+  onVerify,
+  onProposal,
+  workflowTab,
+  canVerify,
+  workflowBusy,
   isAdmin,
   savedPulseKey,
   cellError,
@@ -243,6 +344,7 @@ function SpreadsheetWorkspace({
   const needle = query.trim().toLowerCase();
   const activeFilters = (filters || []).filter((filter) => filter.fieldId && String(filter.value || "").trim());
   const filtered = records.filter((record) => {
+    if (!matchesWorkflowTab(fields, record, workflowTab)) return false;
     if (needle) {
       const matches = fields.some((field) => {
         const raw = record.values?.[field.field_key];
@@ -349,6 +451,10 @@ function SpreadsheetWorkspace({
     return actionRef.current.commit(record, field, fieldIndex, draft, move);
   }, []);
 
+  const validateRow = useCallback((record) => actionRef.current.onValidate(record), []);
+  const verifyRow = useCallback((record) => actionRef.current.onVerify(record), []);
+  const proposeRow = useCallback((record, patch) => actionRef.current.onProposal(record, patch), []);
+
   function toggleAllVisible() {
     const visibleIds = viewRecords.map((record) => record.id);
     const allOn = visibleIds.length > 0 && visibleIds.every((id) => checkedIds.includes(id));
@@ -437,6 +543,9 @@ function SpreadsheetWorkspace({
     actionRef.current = {
       onInsertRow,
       onDeleteRow,
+      onValidate,
+      onVerify,
+      onProposal,
       commit: commitEditor,
     };
   });
@@ -602,6 +711,11 @@ function SpreadsheetWorkspace({
                       onInsertRow={insertRelative}
                       onDeleteRow={deleteOne}
                       onCommit={commitCell}
+                      canVerify={canVerify}
+                      busyAction={workflowBusy?.recordId === record.id ? workflowBusy.action : ""}
+                      onValidate={validateRow}
+                      onVerify={verifyRow}
+                      onProposal={proposeRow}
                     />
                     );
                   })

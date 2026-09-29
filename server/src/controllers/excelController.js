@@ -2,6 +2,7 @@ const pool = require("../config/db");
 const XLSX = require("xlsx");
 const { normalizeFieldKey, normalizeCellValue, listAccessibleFields } = require("./datasetController");
 const { ensureSchema } = require("../database/ensure");
+const { ensureMasterFields, canonicalFieldName, specForHeader, findMasterField } = require("../constants/masterFields");
 
 const RECORD_BATCH = 1000;
 const VALUE_BATCH = 1000;
@@ -143,6 +144,7 @@ function storedValue(field, raw) {
 }
 
 async function loadDatasetFields(datasetId) {
+  await ensureMasterFields(pool, datasetId);
   const datasetResult = await pool.query(
     "SELECT id, name FROM datasets WHERE id = $1 AND is_deleted = FALSE",
     [datasetId]
@@ -235,6 +237,8 @@ const importExcel = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
+    await ensureMasterFields(client, datasetId);
+
     const fieldsResult = await client.query(
       `
       SELECT id, name, field_key, field_type, position, is_required, is_deleted
@@ -254,17 +258,23 @@ const importExcel = async (req, res) => {
     const columns = headers.map((header) => ({ header, field: null }));
 
     for (const column of columns) {
-      const field = matchHeader(column.header, fields);
+      const canonical = canonicalFieldName(column.header);
+      const lookupName = canonical || column.header;
+      let field = matchHeader(lookupName, fields) || findMasterField(fields, lookupName);
       if (field && !claimedFieldIds.has(Number(field.id))) {
         claimedFieldIds.add(Number(field.id));
+        column.header = field.name;
         column.field = field;
         continue;
       }
+      if (canonical && !field) column.header = canonical;
+      const master = specForHeader(column.header);
       const fieldKey = uniqueFieldKey(normalizeFieldKey(column.header) || "column", usedKeys);
       const spec = {
         header: column.header,
         name: column.header.slice(0, 255),
         fieldKey,
+        fieldType: master?.field_type || "text",
         position: nextPosition,
       };
       nextPosition += 1;
@@ -276,7 +286,7 @@ const importExcel = async (req, res) => {
       const params = [];
       const placeholders = pending.map((spec, index) => {
         const offset = index * 5;
-        params.push(datasetId, spec.name, spec.fieldKey, "text", spec.position);
+        params.push(datasetId, spec.name, spec.fieldKey, spec.fieldType || "text", spec.position);
         return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, FALSE)`;
       });
       const inserted = await client.query(

@@ -13,6 +13,7 @@ import {
   clearSession,
   downloadName,
   errorMessage,
+  formatRole,
   isAdminRole,
   messageFromResponse,
   readUser,
@@ -26,6 +27,7 @@ function DatasetDetail() {
   const { id } = useParams();
   const user = readUser();
   const admin = isAdminRole(user?.role);
+  const canVerify = admin || formatRole(user?.role) === "Managing Person";
 
   const [dataset, setDataset] = useState(null);
   const [records, setRecords] = useState([]);
@@ -40,6 +42,8 @@ function DatasetDetail() {
   const [savedPulseKey, setSavedPulseKey] = useState("");
   const [cellError, setCellError] = useState(null);
   const [focusRecordId, setFocusRecordId] = useState(null);
+  const [workflowTab, setWorkflowTab] = useState("all");
+  const [workflowBusy, setWorkflowBusy] = useState(null);
   const [columnModal, setColumnModal] = useState(null);
   const [fieldName, setFieldName] = useState("");
   const [fieldKey, setFieldKey] = useState("");
@@ -362,6 +366,34 @@ function DatasetDetail() {
     }
   }
 
+  async function runWorkflow(record, action, body, successText) {
+    setWorkflowBusy({ recordId: record.id, action });
+    setError("");
+    try {
+      const { data } = await axios.patch(
+        `${API_BASE}/api/datasets/${id}/records/${record.id}/workflow/${action}`,
+        body,
+        authConfig()
+      );
+      setRecords((current) => current.map((entry) => (
+        entry.id === record.id
+          ? { ...entry, values: { ...entry.values, ...(data.values || {}) } }
+          : entry
+      )));
+      setLastSyncAt(new Date().toISOString());
+      notify(successText);
+      if (logsOpen) loadLogs();
+    } catch (err) {
+      if (err.response?.status === 401) {
+        clearSession(navigate);
+        return;
+      }
+      setError(errorMessage(err, "Unable to update this record."));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
   function toggleLogs() {
     const next = !logsOpen;
     setLogsOpen(next);
@@ -408,6 +440,8 @@ function DatasetDetail() {
         onPermissions={() => setPermissionsOpen(true)}
         canManagePermissions={admin}
         filterRef={filterRef}
+        workflowTab={workflowTab}
+        onWorkflowTab={setWorkflowTab}
       />
 
       {error ? <p className="sheet-banner is-error">{error}</p> : null}
@@ -428,6 +462,12 @@ function DatasetDetail() {
         onInsertColumn={(field, placement) => openColumnModal(field, placement)}
         onDeleteColumn={setDeleteColumn}
         isAdmin={admin}
+        canVerify={canVerify}
+        workflowTab={workflowTab}
+        workflowBusy={workflowBusy}
+        onValidate={(record) => runWorkflow(record, "validate", { isValidated: true }, "Record validated")}
+        onVerify={(record) => runWorkflow(record, "verify", {}, "Record verified")}
+        onProposal={(record, patch) => runWorkflow(record, "proposal", patch, "Proposal updated")}
         savedPulseKey={savedPulseKey}
         cellError={cellError}
         lastSyncAt={lastSyncAt}

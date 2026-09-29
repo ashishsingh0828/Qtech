@@ -12,7 +12,7 @@ export function formatRole(role) {
   if (!role) return "User";
   const normalized = String(role).toLowerCase().replace(/[_-]+/g, " ").trim();
   if (normalized === "admin") return "Admin";
-  if (normalized === "managing person" || normalized === "managingperson") {
+  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
     return "Managing Person";
   }
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
