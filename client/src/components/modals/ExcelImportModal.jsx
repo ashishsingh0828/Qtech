@@ -75,7 +75,7 @@ function ExcelImportModal({ open, onClose, onConfirm }) {
         </div>
 
         <div
-          className={dragOver ? "dropzone is-active" : "dropzone"}
+          className={dragOver ? "dropzone is-active" : file ? "dropzone" : "dropzone is-pulse"}
           onDragOver={(event) => {
             event.preventDefault();
             setDragOver(true);
@@ -120,7 +120,7 @@ function ExcelImportModal({ open, onClose, onConfirm }) {
           </button>
           <button className="primary-button" type="button" onClick={confirmImport} disabled={!file || importing}>
             {importing ? <span className="spinner" aria-hidden="true" /> : null}
-            {importing ? "Importing all rows and columns..." : "Confirm & Upload"}
+            {importing ? "Importing all rows and columns..." : "Confirm & Import to Sheet"}
           </button>
         </div>
       </div>

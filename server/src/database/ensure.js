@@ -42,6 +42,31 @@ async function applySchema() {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_record_values_lookup ON record_values(record_id, field_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_fields_dataset_id ON fields(dataset_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_audit_logs_record_field ON audit_logs(record_id, field_id)");
+  await pool.query("ALTER TABLE fields ADD COLUMN IF NOT EXISTS group_name VARCHAR(120)");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE,
+      record_id INTEGER REFERENCES records(id) ON DELETE SET NULL,
+      is_read BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, is_read, created_at DESC)");
+  await pool.query(`
+    INSERT INTO roles (name, description)
+    SELECT seed.name, seed.description
+    FROM (VALUES
+      ('Manager', 'Verifies records, deletes files and rows, and receives workflow alerts'),
+      ('Validator', 'Edits data-validation columns only'),
+      ('Service', 'Edits AMC, schedule, complaint, and breakdown columns only')
+    ) AS seed(name, description)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM roles existing WHERE lower(existing.name) = lower(seed.name)
+    )
+  `);
 }
 
 module.exports = { ensureSchema };

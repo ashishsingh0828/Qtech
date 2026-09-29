@@ -254,15 +254,73 @@
 
 .grid-table thead th {
   position: sticky;
-  top: 0;
   z-index: 3;
-  height: 44px;
   background: rgba(248, 250, 252, 0.96);
-  box-shadow: 0 1px 0 #e2e8f0, 0 8px 16px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 0 #e2e8f0;
   backdrop-filter: blur(8px);
   font-size: 13px;
   font-weight: 700;
   text-align: left;
+}
+
+.grid-table thead tr.group-row th {
+  top: 0;
+  z-index: 4;
+  height: 36px;
+  padding: 4px 10px;
+}
+
+.grid-table thead tr.column-row th {
+  top: 36px;
+  height: 44px;
+  box-shadow: 0 1px 0 #e2e8f0, 0 8px 16px rgba(15, 23, 42, 0.04);
+}
+
+.group-head {
+  overflow: hidden;
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.group-tone-slate { background: #f1f5f9; color: #334155; }
+.group-tone-amber { background: #fef3c7; color: #92400e; }
+.group-tone-blue { background: #dbeafe; color: #1d4ed8; }
+.group-tone-violet { background: #ede9fe; color: #6d28d9; }
+.group-tone-indigo { background: #e0e7ff; color: #3730a3; }
+.group-tone-emerald { background: #d1fae5; color: #047857; }
+.group-tone-rose { background: #ffe4e6; color: #be123c; }
+
+.pms-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #5b21b6;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pms-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .row-num {
@@ -844,6 +902,15 @@
 .dropzone.is-active {
   border-color: #4f46e5;
   background: #eef2ff;
+}
+
+.dropzone.is-pulse {
+  animation: upload-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes upload-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.2); }
+  50% { box-shadow: 0 0 0 10px rgba(79, 70, 229, 0); }
 }
 
 .import-error {

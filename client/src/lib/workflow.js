@@ -24,23 +24,85 @@ export function isOutOfWarranty(status) {
   return key === "out of warranty" || key === "expired";
 }
 
+export function readAny(fields, record, names) {
+  for (const name of names) {
+    const value = readField(fields, record, name);
+    if (value) return value;
+  }
+  return "";
+}
+
 export function workflowColumn(field) {
   const key = compactName(field?.name);
-  if (key === "status") return "status";
-  if (key === "validated") return "validated";
+  if (key === "status" || key === "finalstatus") return "status";
+  if (key === "validated" || key === "validatedyesno") return "validated";
   if (key === "verificationstatus") return "verification";
   if (key === "proposalsent") return "proposal";
   if (key === "followupdate") return "followup";
+  if (key === "days") return "days";
+  if (key === "totalpms") return "totalpms";
   return "";
+}
+
+export function isScheduleDetail(field) {
+  const key = compactName(field?.name);
+  if (key === "totalpms") return false;
+  return /^pms\d+$/.test(key) || /^pmdate\d*$/.test(key);
+}
+
+export function validatedValue(fields, record) {
+  return readAny(fields, record, ["Validated (Yes/No)", "Validated"]);
 }
 
 export function matchesWorkflowTab(fields, record, tab) {
   if (!tab || tab === "all") return true;
-  if (tab === "validation") return !isYes(readField(fields, record, "Validated"));
-  if (tab === "verification") {
-    const status = readField(fields, record, "Verification Status").trim().toLowerCase();
-    return isYes(readField(fields, record, "Validated")) && status !== "verified ok";
+  const validated = isYes(validatedValue(fields, record));
+  if (tab === "validation") return !validated;
+  if (tab === "overdue") {
+    const due = readAny(fields, record, ["By when Data will be validated"]).slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    return !validated && /^\d{4}-\d{2}-\d{2}$/.test(due) && due < today;
   }
-  if (tab === "followup") return isOutOfWarranty(readField(fields, record, "Status"));
+  if (tab === "verification") {
+    const status = readAny(fields, record, ["Verification Status"]).trim().toLowerCase();
+    return validated && status !== "verified ok";
+  }
+  if (tab === "followup") {
+    const status = readAny(fields, record, ["Status", "Final Status"]);
+    return isOutOfWarranty(status);
+  }
   return true;
+}
+
+export function nextDueDate(fields, record) {
+  const dates = [];
+  for (const field of fields || []) {
+    if (!/^pmdate\d*$/.test(compactName(field.name))) continue;
+    const value = String(record?.values?.[field.field_key] || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) dates.push(value);
+  }
+  if (!dates.length) return "";
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = dates.filter((value) => value >= today).sort();
+  return upcoming[0] || dates.sort()[0];
+}
+
+export function contractDays(fields, record) {
+  const start = readAny(fields, record, ["Start Date"]).slice(0, 10);
+  const end = readAny(fields, record, ["End Date"]).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return "";
+  const days = Math.round((new Date(`${end}T00:00:00Z`) - new Date(`${start}T00:00:00Z`)) / 86400000);
+  return Number.isFinite(days) ? String(days) : "";
+}
+
+export function groupTone(name) {
+  const key = String(name || "").trim().toLowerCase();
+  if (key.includes("customer")) return "slate";
+  if (key.includes("validation")) return "amber";
+  if (key === "amc") return "blue";
+  if (key.includes("schedule")) return "violet";
+  if (key.includes("instrument")) return "indigo";
+  if (key.includes("follow")) return "emerald";
+  if (key.includes("breakdown") || key.includes("compaint") || key.includes("complaint")) return "rose";
+  return "slate";
 }

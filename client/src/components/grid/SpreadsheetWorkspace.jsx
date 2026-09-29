@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ChevronDown,
   Lock,
+  Minus,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -18,7 +19,7 @@ import {
   typeLabel,
 } from "../../lib/cells";
 import { syncLabel } from "../../lib/session";
-import { isOutOfWarranty, isYes, matchesWorkflowTab, readField, workflowColumn } from "../../lib/workflow";
+import { contractDays, groupTone, isOutOfWarranty, isScheduleDetail, isYes, matchesWorkflowTab, nextDueDate, readAny, workflowColumn } from "../../lib/workflow";
 import "./grid.css";
 
 function Editor({ field, value, onCommit, onCancel }) {
@@ -122,7 +123,11 @@ const SheetRow = memo(function SheetRow({
   onInsertRow,
   onDeleteRow,
   onCommit,
+  allFields,
   canVerify,
+  canDeleteRows,
+  roleLabel,
+  pmsOpen,
   busyAction,
   onValidate,
   onVerify,
@@ -158,6 +163,11 @@ const SheetRow = memo(function SheetRow({
             <button className="menu-item" type="button" onClick={() => onInsertRow(record, "below")}>
               Insert row below
             </button>
+            {canDeleteRows ? (
+              <button className="menu-item is-danger" type="button" onClick={() => onDeleteRow(record)}>
+                Delete Row
+              </button>
+            ) : null}
           </div>
         ) : null}
       </td>
@@ -167,13 +177,16 @@ const SheetRow = memo(function SheetRow({
         const columnKind = workflowColumn(field);
         const shown = cellText(field, record.values?.[field.field_key]);
         const tone = statusTone(shown);
-        const validated = isYes(readField(fields, record, "Validated"));
-        const validatedBy = readField(fields, record, "Validated By");
-        const verification = readField(fields, record, "Verification Status");
-        const verifiedBy = readField(fields, record, "Verified By");
-        const proposalSent = readField(fields, record, "Proposal Sent");
-        const statusValue = readField(fields, record, "Status");
-        const followUp = readField(fields, record, "Follow-up Date").slice(0, 10);
+        const sourceFields = allFields || fields;
+        const validated = isYes(readAny(sourceFields, record, ["Validated (Yes/No)", "Validated"]));
+        const validatedBy = readAny(sourceFields, record, ["Validated by", "Validated By"]);
+        const verification = readAny(sourceFields, record, ["Verification Status"]);
+        const verifiedBy = readAny(sourceFields, record, ["Verified By"]);
+        const proposalSent = readAny(sourceFields, record, ["Proposal Sent"]);
+        const statusValue = readAny(sourceFields, record, ["Status", "Final Status"]);
+        const followUp = readAny(sourceFields, record, ["Follow-up Date"]).slice(0, 10);
+        const computedDays = columnKind === "days" && !shown ? contractDays(sourceFields, record) : "";
+        const dueTag = columnKind === "totalpms" && !pmsOpen ? nextDueDate(sourceFields, record) : "";
         const outOfWarranty = isOutOfWarranty(statusValue);
         const verified = verification.trim().toLowerCase() === "verified ok";
         const isEditing = isSelected && editing && !locked && columnKind !== "validated" && columnKind !== "verification" && columnKind !== "proposal" && !(columnKind === "followup" && outOfWarranty);
@@ -288,19 +301,34 @@ const SheetRow = memo(function SheetRow({
                     <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
                   )
                 ) : null}
-                {locked && columnKind !== "verification" ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
+                {columnKind === "days" ? (
+                  <span className={(shown || computedDays) ? "cell-clip" : "cell-empty cell-clip"} title={shown || computedDays || ""}>
+                    {shown || computedDays || "—"}
+                  </span>
+                ) : null}
+                {columnKind === "totalpms" ? (
+                  <span className="pms-summary">
+                    <span className={shown ? "cell-clip" : "cell-empty cell-clip"}>{shown || "—"}</span>
+                    {dueTag ? <span className="status-pill status-pending">Next Due PMS {dueTag}</span> : null}
+                  </span>
+                ) : null}
+                {locked && columnKind !== "verification" ? (
+                  <Lock className="lock-icon" size={13} aria-label="Read only" title={`Editing restricted for ${roleLabel || "this role"}`} />
+                ) : null}
                 {errorFieldId === field.id ? <span className="cell-error">{errorMessage}</span> : null}
               </div>
             )}
           </td>
         );
       })}
-      <td className="actions-cell">
-        <button className="delete-link" type="button" onClick={() => onDeleteRow(record)}>
-          <Trash2 size={13} aria-hidden="true" />
-          Delete
-        </button>
-      </td>
+      {canDeleteRows ? (
+        <td className="actions-cell">
+          <button className="delete-link" type="button" onClick={() => onDeleteRow(record)}>
+            <Trash2 size={13} aria-hidden="true" />
+            Delete
+          </button>
+        </td>
+      ) : null}
     </tr>
   );
 });
@@ -322,6 +350,8 @@ function SpreadsheetWorkspace({
   onProposal,
   workflowTab,
   canVerify,
+  canDeleteRows,
+  roleLabel,
   workflowBusy,
   isAdmin,
   savedPulseKey,
@@ -337,9 +367,20 @@ function SpreadsheetWorkspace({
   const [rowMenu, setRowMenu] = useState(null);
   const [checkedIds, setCheckedIds] = useState([]);
   const [columnWidths, setColumnWidths] = useState({});
+  const [pmsOpen, setPmsOpen] = useState(false);
   const gridRef = useRef(null);
   const scrollPos = useRef({ top: 0, left: 0 });
   const actionRef = useRef({});
+
+  const columnFields = pmsOpen ? fields : fields.filter((field) => !isScheduleDetail(field));
+  const groupSegments = [];
+  columnFields.forEach((field) => {
+    const name = field.group_name || "General";
+    const last = groupSegments[groupSegments.length - 1];
+    if (last && last.name === name) last.fields.push(field);
+    else groupSegments.push({ name, fields: [field] });
+  });
+  const scheduleCollapsed = !pmsOpen && fields.some((field) => isScheduleDetail(field));
 
   const needle = query.trim().toLowerCase();
   const activeFilters = (filters || []).filter((filter) => filter.fieldId && String(filter.value || "").trim());
@@ -474,7 +515,7 @@ function SpreadsheetWorkspace({
   }, [columnMenu, rowMenu]);
 
   function moveSelection(direction) {
-    if (!selection || !viewRecords.length || !fields.length) return;
+    if (!selection || !viewRecords.length || !columnFields.length) return;
     const rowIndex = viewRecords.findIndex((record) => record.id === selection.recordId);
     if (rowIndex < 0) return;
     let nextRow = rowIndex;
@@ -483,7 +524,7 @@ function SpreadsheetWorkspace({
     if (direction === "up") nextRow = Math.max(0, rowIndex - 1);
     if (direction === "right") {
       nextCol += 1;
-      if (nextCol >= fields.length) {
+      if (nextCol >= columnFields.length) {
         nextCol = 0;
         nextRow = Math.min(viewRecords.length - 1, rowIndex + 1);
       }
@@ -491,7 +532,7 @@ function SpreadsheetWorkspace({
     if (direction === "left") {
       nextCol -= 1;
       if (nextCol < 0) {
-        nextCol = fields.length - 1;
+        nextCol = columnFields.length - 1;
         nextRow = Math.max(0, rowIndex - 1);
       }
     }
@@ -503,7 +544,7 @@ function SpreadsheetWorkspace({
     if (!selection || editing) return;
     if (event.key === "Enter") {
       event.preventDefault();
-      const field = fields[selection.fieldIndex];
+      const field = columnFields[selection.fieldIndex];
       if (field && canEditField(field)) setEditing(true);
     } else if (event.key === "Tab") {
       event.preventDefault();
@@ -551,7 +592,7 @@ function SpreadsheetWorkspace({
   });
 
   const selectedRecord = selection ? viewRecords.find((record) => record.id === selection.recordId) : null;
-  const selectedField = selection ? fields[selection.fieldIndex] : null;
+  const selectedField = selection ? columnFields[selection.fieldIndex] : null;
   const selectedIndex = selectedRecord ? viewRecords.findIndex((record) => record.id === selectedRecord.id) : -1;
   const selectedLabel = selectedField && selectedIndex >= 0
     ? `${columnLetter(selection.fieldIndex)}${selectedIndex + 1} · ${selectedField.name}`
@@ -578,7 +619,42 @@ function SpreadsheetWorkspace({
         >
           <table className="grid-table">
             <thead>
-              <tr>
+              <tr className="group-row">
+                <th className="row-num" aria-hidden="true" />
+                {groupSegments.map((segment) => {
+                  const tone = groupTone(segment.name);
+                  const isSchedule = segment.name.toLowerCase().includes("schedule");
+                  return (
+                    <th
+                      key={`${segment.name}-${segment.fields[0].id}`}
+                      className={`group-head group-tone-${tone}`}
+                      colSpan={segment.fields.length}
+                      scope="colgroup"
+                    >
+                      <span className={`group-chip group-tone-${tone}`}>{segment.name}</span>
+                      {isSchedule && (scheduleCollapsed || pmsOpen) ? (
+                        <button
+                          className="pms-toggle"
+                          type="button"
+                          aria-expanded={pmsOpen}
+                          onClick={() => {
+                            setPmsOpen((open) => !open);
+                            setSelection((current) => (
+                              current ? { ...current, fieldIndex: 0 } : current
+                            ));
+                            setEditing(false);
+                          }}
+                        >
+                          {pmsOpen ? <Minus size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+                          {pmsOpen ? "Hide PMS" : "Show PMS"}
+                        </button>
+                      ) : null}
+                    </th>
+                  );
+                })}
+                {canDeleteRows ? <th className="actions-cell" aria-hidden="true" /> : null}
+              </tr>
+              <tr className="column-row">
                 <th className="row-num">
                   <label className="row-check">
                     <input
@@ -590,7 +666,7 @@ function SpreadsheetWorkspace({
                     <span>#</span>
                   </label>
                 </th>
-                {fields.map((field) => {
+                {columnFields.map((field) => {
                   const direction = sort?.fieldId === field.id ? sort.direction : "";
                   return (
                     <th key={field.id} className="col-head" scope="col" style={columnSize(field.id)}>
@@ -666,23 +742,23 @@ function SpreadsheetWorkspace({
                     </th>
                   );
                 })}
-                <th className="actions-cell"> </th>
+                {canDeleteRows ? <th className="actions-cell"> </th> : null}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="grid-empty" colSpan={fields.length + 2}>Loading rows…</td>
+                  <td className="grid-empty" colSpan={columnFields.length + 1 + (canDeleteRows ? 1 : 0)}>Loading rows…</td>
                 </tr>
               ) : null}
-              {!loading && fields.length === 0 ? (
+              {!loading && columnFields.length === 0 ? (
                 <tr>
                   <td className="grid-empty" colSpan={2}>Add a column before entering rows.</td>
                 </tr>
               ) : null}
-              {!loading && fields.length > 0 && viewRecords.length === 0 ? (
+              {!loading && columnFields.length > 0 && viewRecords.length === 0 ? (
                 <tr>
-                  <td className="grid-empty" colSpan={fields.length + 2}>
+                  <td className="grid-empty" colSpan={columnFields.length + 1 + (canDeleteRows ? 1 : 0)}>
                     {records.length === 0 ? "No rows yet." : "No rows match your search or filter."}
                   </td>
                 </tr>
@@ -695,7 +771,8 @@ function SpreadsheetWorkspace({
                       key={record.id}
                       record={record}
                       rowIndex={rowIndex}
-                      fields={fields}
+                      fields={columnFields}
+                      allFields={fields}
                       columnWidths={columnWidths}
                       selectedFieldIndex={selection?.recordId === record.id ? selection.fieldIndex : -1}
                       editing={Boolean(editing && selection?.recordId === record.id)}
@@ -712,6 +789,9 @@ function SpreadsheetWorkspace({
                       onDeleteRow={deleteOne}
                       onCommit={commitCell}
                       canVerify={canVerify}
+                      canDeleteRows={canDeleteRows}
+                      roleLabel={roleLabel}
+                      pmsOpen={pmsOpen}
                       busyAction={workflowBusy?.recordId === record.id ? workflowBusy.action : ""}
                       onValidate={validateRow}
                       onVerify={verifyRow}
@@ -729,7 +809,7 @@ function SpreadsheetWorkspace({
         <span>Filtered Rows <strong>{viewRecords.length}</strong></span>
         <span>Selected Cell <strong>{selectedLabel}</strong></span>
         <span>Sync <strong>{syncLabel(lastSyncAt)}</strong></span>
-        {checkedRecords.length ? (
+        {canDeleteRows && checkedRecords.length ? (
           <button className="delete-link" type="button" onClick={() => onDeleteRows(checkedRecords)}>
             Delete {checkedRecords.length} selected
           </button>

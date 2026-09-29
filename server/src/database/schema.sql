@@ -78,6 +78,7 @@ CREATE TABLE fields (
     position INTEGER NOT NULL DEFAULT 0,
     is_required BOOLEAN DEFAULT FALSE,
     is_deleted BOOLEAN DEFAULT FALSE,
+    group_name VARCHAR(120),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -170,6 +171,16 @@ ON datasets(created_by);
 
 CREATE INDEX idx_fields_dataset_id
 ON fields(dataset_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE,
+    record_id INTEGER REFERENCES records(id) ON DELETE SET NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE INDEX idx_records_dataset_id
 ON records(dataset_id);

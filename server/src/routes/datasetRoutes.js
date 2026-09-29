@@ -67,7 +67,7 @@ router.post("/:id/import-excel", excelUpload, importExcel);
 router.get("/:id/export-excel", exportExcel);
 router.patch("/:id/restore", requireRole(["Admin"]), restoreDataset);
 router.patch("/:id", updateDataset);
-router.delete("/:id", requireRole(["Admin"]), softDeleteDataset);
+router.delete("/:id", requireRole(["Admin", "Manager"]), softDeleteDataset);
 router.get("/:id", getDataset);
 router.post("/:id/fields", requireRole(["Admin"]), addField);
 router.delete("/:id/fields/:fieldId", requireRole(["Admin"]), deleteField);

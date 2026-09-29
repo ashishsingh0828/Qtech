@@ -159,8 +159,9 @@ function GridToolbar({
         {[
           ["all", "All Records"],
           ["validation", "Needs Validation"],
-          ["verification", "Needs Verification"],
-          ["followup", "Out of Warranty / Follow-up Due"],
+          ["overdue", "Validation Overdue"],
+          ["verification", "Pending Verification"],
+          ["followup", "Out of Warranty / AMC Due"],
         ].map(([id, label]) => (
           <button
             key={id}

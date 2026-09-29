@@ -7,13 +7,11 @@ function canonicalRole(role) {
     .trim();
 
   if (normalized === "admin") return "Admin";
-  if (
-    normalized === "manager" ||
-    normalized === "managing person" ||
-    normalized === "managingperson"
-  ) {
-    return "Managing Person";
+  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
+    return "Manager";
   }
+  if (normalized === "validator") return "Validator";
+  if (normalized === "service") return "Service";
 
   return String(role || "");
 }

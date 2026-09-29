@@ -97,7 +97,9 @@ function UsersPage() {
                       onChange={(event) => changeRole(person, event.target.value)}
                     >
                       <option value="Admin">Admin</option>
-                      <option value="Managing Person">Managing Person</option>
+                      <option value="Manager">Manager</option>
+                      <option value="Validator">Validator</option>
+                      <option value="Service">Service</option>
                     </select>
                   </td>
                 </tr>

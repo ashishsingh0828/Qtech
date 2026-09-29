@@ -20,7 +20,10 @@ function FieldPermissionManager({ open, datasetId, onClose, navigate }) {
       try {
         const { data } = await axios.get(`${API_BASE}/api/users`, authConfig());
         if (!active) return;
-        const managers = (data.users || []).filter((person) => formatRole(person.role) === "Managing Person");
+        const managers = (data.users || []).filter((person) => {
+          const role = formatRole(person.role);
+          return role === "Manager" || role === "Validator" || role === "Service";
+        });
         setPeople(managers);
         setUserId(managers[0] ? String(managers[0].id) : "");
       } catch (err) {
@@ -126,7 +129,7 @@ function FieldPermissionManager({ open, datasetId, onClose, navigate }) {
         <div className="modal-heading">
           <div>
             <h2 id="field-permissions-title">Column permissions</h2>
-            <p className="toolbar-title">Choose what each Managing Person can see and change in this dataset.</p>
+            <p className="toolbar-title">Choose column access for Manager, Validator, and Service users.</p>
           </div>
           <button className="icon-button" type="button" aria-label="Close" onClick={() => onClose(false)} disabled={saving}>
             <X size={18} />
@@ -137,9 +140,9 @@ function FieldPermissionManager({ open, datasetId, onClose, navigate }) {
 
         <form onSubmit={save}>
           <label className="perm-label">
-            Managing Person
+            Team member
             <select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={!people.length || saving}>
-              {people.length === 0 ? <option value="">No managing persons</option> : null}
+              {people.length === 0 ? <option value="">No restricted users</option> : null}
               {people.map((person) => (
                 <option key={person.id} value={person.id}>
                   {person.name} · {person.email}

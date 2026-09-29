@@ -22,7 +22,17 @@ function cellToString(value) {
       return value.richText.map((part) => part?.text || "").join("").trim();
     }
   }
-  return String(value).trim();
+  const text = String(value).trim();
+  const stamped = text.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}/);
+  if (stamped) return stamped[1];
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial > 20000 && serial < 80000) {
+      const parsed = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    }
+  }
+  return text;
 }
 
 function sheetBounds(sheet) {
@@ -57,9 +67,17 @@ function readSheet(buffer) {
   });
 
   const matrix = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
-  if (!matrix.length) return { headers: [], rows: [], sheetName };
+  if (!matrix.length) return { headers: [], groups: [], rows: [], sheetName };
 
-  const headerRow = Array.isArray(matrix[0]) ? matrix[0] : [];
+  const filled = (row) => (Array.isArray(row) ? row.filter((cell) => cellToString(cell)).length : 0);
+  const groupHint = /customer detail|instrument|data validation|schedule service|compaint|complaint|breakdown|follow up|\bamc\b/i;
+  const twoTier = matrix.length >= 2 && (
+    (Array.isArray(matrix[0]) && matrix[0].some((cell) => groupHint.test(cellToString(cell))))
+    || (filled(matrix[0]) > 0 && filled(matrix[1]) > filled(matrix[0]))
+  );
+  const headerRow = Array.isArray(matrix[twoTier ? 1 : 0]) ? matrix[twoTier ? 1 : 0] : [];
+  const groupRow = twoTier && Array.isArray(matrix[0]) ? matrix[0] : [];
+  const firstDataRow = twoTier ? 2 : 1;
   const valued = new Set();
   let lastUsed = -1;
   for (let index = 0; index < headerRow.length; index += 1) {
@@ -73,7 +91,7 @@ function readSheet(buffer) {
       if (index > lastUsed) lastUsed = index;
     }
   }
-  if (lastUsed < 0) return { headers: [], rows: [], sheetName };
+  if (lastUsed < 0) return { headers: [], groups: [], rows: [], sheetName };
 
   const kept = [];
   for (let index = 0; index <= lastUsed; index += 1) {
@@ -81,7 +99,7 @@ function readSheet(buffer) {
     if (!text && !valued.has(index)) continue;
     kept.push({ index, label: text || `Column ${index + 1}` });
   }
-  if (!kept.length) return { headers: [], rows: [], sheetName };
+  if (!kept.length) return { headers: [], groups: [], rows: [], sheetName };
 
   const seen = new Map();
   const headers = kept.map((column) => {
@@ -90,8 +108,16 @@ function readSheet(buffer) {
     return count === 0 ? column.label : `${column.label} (${count + 1})`;
   });
 
+  let carriedGroup = "";
+  const groups = kept.map((column) => {
+    const explicit = cellToString(groupRow[column.index]);
+    if (explicit) carriedGroup = explicit;
+    if (twoTier) return carriedGroup || "General";
+    return specForHeader(column.label)?.group || "General";
+  });
+
   const rows = [];
-  for (let rowIndex = 1; rowIndex < matrix.length; rowIndex += 1) {
+  for (let rowIndex = firstDataRow; rowIndex < matrix.length; rowIndex += 1) {
     const source = Array.isArray(matrix[rowIndex]) ? matrix[rowIndex] : [];
     const row = [];
     let hasValue = false;
@@ -106,6 +132,7 @@ function readSheet(buffer) {
 
   return {
     headers,
+    groups,
     rows: rows.map((row) => row || headers.map(() => "")),
     sheetName,
   };
@@ -153,7 +180,7 @@ async function loadDatasetFields(datasetId) {
 
   const fieldsResult = await pool.query(
     `
-    SELECT id, name, field_key, field_type, position, is_required
+    SELECT id, name, field_key, field_type, position, is_required, group_name
     FROM fields
     WHERE dataset_id = $1 AND is_deleted = FALSE
     ORDER BY position ASC, id ASC
@@ -209,10 +236,12 @@ const importExcel = async (req, res) => {
   await ensureSchema();
 
   let headers = [];
+  let groups = [];
   let rows = [];
   try {
     const sheet = readSheet(req.file.buffer);
     headers = sheet.headers;
+    groups = sheet.groups || [];
     rows = sheet.rows;
   } catch (error) {
     console.error("Import excel read error:", error);
@@ -241,7 +270,7 @@ const importExcel = async (req, res) => {
 
     const fieldsResult = await client.query(
       `
-      SELECT id, name, field_key, field_type, position, is_required, is_deleted
+      SELECT id, name, field_key, field_type, position, is_required, is_deleted, group_name
       FROM fields
       WHERE dataset_id = $1
       ORDER BY position ASC, id ASC
@@ -255,7 +284,7 @@ const importExcel = async (req, res) => {
       fieldsResult.rows.reduce((max, field) => Math.max(max, Number(field.position) || 0), -1) + 1;
     const claimedFieldIds = new Set();
     const pending = [];
-    const columns = headers.map((header) => ({ header, field: null }));
+    const columns = headers.map((header, index) => ({ header, group: groups[index] || "", field: null }));
 
     for (const column of columns) {
       const canonical = canonicalFieldName(column.header);
@@ -265,6 +294,13 @@ const importExcel = async (req, res) => {
         claimedFieldIds.add(Number(field.id));
         column.header = field.name;
         column.field = field;
+        if (column.group && column.group !== field.group_name) {
+          await client.query("UPDATE fields SET group_name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", [
+            column.group,
+            field.id,
+          ]);
+          field.group_name = column.group;
+        }
         continue;
       }
       if (canonical && !field) column.header = canonical;
@@ -275,6 +311,7 @@ const importExcel = async (req, res) => {
         name: column.header.slice(0, 255),
         fieldKey,
         fieldType: master?.field_type || "text",
+        groupName: column.group || master?.group || null,
         position: nextPosition,
       };
       nextPosition += 1;
@@ -285,15 +322,15 @@ const importExcel = async (req, res) => {
     if (pending.length) {
       const params = [];
       const placeholders = pending.map((spec, index) => {
-        const offset = index * 5;
-        params.push(datasetId, spec.name, spec.fieldKey, spec.fieldType || "text", spec.position);
-        return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, FALSE)`;
+        const offset = index * 6;
+        params.push(datasetId, spec.name, spec.fieldKey, spec.fieldType || "text", spec.position, spec.groupName);
+        return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, FALSE, $${offset + 6})`;
       });
       const inserted = await client.query(
         `
-        INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required)
+        INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required, group_name)
         VALUES ${placeholders.join(", ")}
-        RETURNING id, name, field_key, field_type, position, is_required
+        RETURNING id, name, field_key, field_type, position, is_required, group_name
         `,
         params
       );
@@ -431,6 +468,7 @@ const exportExcel = async (req, res) => {
       valuesByRecord.get(row.record_id).set(row.field_id, row.value ?? "");
     }
 
+    const groupRow = loaded.fields.map((field) => field.group_name || "Details");
     const headerRow = loaded.fields.map((field) => field.name);
     const dataRows = recordsResult.rows.map((record) => {
       const cellMap = valuesByRecord.get(record.id) || new Map();
@@ -446,7 +484,18 @@ const exportExcel = async (req, res) => {
     });
 
     const workbook = XLSX.utils.book_new();
-    const sheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    const sheet = XLSX.utils.aoa_to_sheet([groupRow, headerRow, ...dataRows]);
+    const merges = [];
+    let mergeStart = 0;
+    for (let index = 1; index <= groupRow.length; index += 1) {
+      if (index === groupRow.length || groupRow[index] !== groupRow[mergeStart]) {
+        if (index - mergeStart > 1) {
+          merges.push({ s: { r: 0, c: mergeStart }, e: { r: 0, c: index - 1 } });
+        }
+        mergeStart = index;
+      }
+    }
+    if (merges.length) sheet["!merges"] = merges;
     XLSX.utils.book_append_sheet(workbook, sheet, "Dataset");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 

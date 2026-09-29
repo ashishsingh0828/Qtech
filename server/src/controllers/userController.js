@@ -1,7 +1,13 @@
 const pool = require("../config/db");
 const { canonicalRole } = require("../middleware/auth");
 
-const ALLOWED_ROLES = new Set(["Admin", "Managing Person"]);
+const ALLOWED_ROLES = new Set(["Admin", "Manager", "Validator", "Service"]);
+const ROLE_LOOKUP = {
+  Admin: ["admin"],
+  Manager: ["manager", "managing person"],
+  Validator: ["validator"],
+  Service: ["service"],
+};
 
 const listUsers = async (req, res) => {
   try {
@@ -39,10 +45,8 @@ const updateUserRole = async (req, res) => {
   }
 
   if (!ALLOWED_ROLES.has(role)) {
-    return res.status(400).json({ error: "Role must be Admin or Managing Person" });
+    return res.status(400).json({ error: "Role must be Admin, Manager, Validator, or Service" });
   }
-
-  const roleKey = role === "Admin" ? "admin" : "managing person";
 
   try {
     const userResult = await pool.query("SELECT id FROM users WHERE id = $1", [userId]);
@@ -50,17 +54,24 @@ const updateUserRole = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const roleResult = await pool.query(
-      `
-      SELECT id, name
-      FROM roles
-      WHERE lower(replace(replace(name, '_', ' '), '-', ' ')) = $1
-      `,
-      [roleKey]
-    );
+    let roleResult = { rows: [] };
+    for (const roleKey of ROLE_LOOKUP[role]) {
+      roleResult = await pool.query(
+        `
+        SELECT id, name
+        FROM roles
+        WHERE lower(replace(replace(name, '_', ' '), '-', ' ')) = $1
+        `,
+        [roleKey]
+      );
+      if (roleResult.rows.length) break;
+    }
 
     if (!roleResult.rows.length) {
-      return res.status(400).json({ error: "Role was not found" });
+      roleResult = await pool.query(
+        "INSERT INTO roles (name, description) VALUES ($1, $2) RETURNING id, name",
+        [role, `${role} workspace role`]
+      );
     }
 
     const updated = await pool.query(

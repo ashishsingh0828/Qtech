@@ -438,7 +438,7 @@
 
 .stats-banner {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 22px 28px 0;
 }
@@ -546,6 +546,35 @@
   color: #312e81;
   font-size: 12px;
   font-weight: 700;
+}
+
+.file-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-card-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1e293b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.file-card-actions button:hover {
+  border-color: #c7d2fe;
+  color: #312e81;
+}
+
+.file-card-actions button.is-danger {
+  color: #be123c;
 }
 
 .file-card-foot {

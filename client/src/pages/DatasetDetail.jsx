@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { RefreshCw, X } from "lucide-react";
 import GridToolbar from "../components/grid/GridToolbar";
@@ -10,6 +10,7 @@ import { useToast } from "../components/toast-context";
 import {
   API_BASE,
   authConfig,
+  canDeleteRole,
   clearSession,
   downloadName,
   errorMessage,
@@ -25,9 +26,12 @@ function DatasetDetail() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const user = readUser();
+  const roleLabel = formatRole(user?.role);
   const admin = isAdminRole(user?.role);
-  const canVerify = admin || formatRole(user?.role) === "Managing Person";
+  const canDeleteRows = canDeleteRole(user?.role);
+  const canVerify = roleLabel === "Admin" || roleLabel === "Manager";
 
   const [dataset, setDataset] = useState(null);
   const [records, setRecords] = useState([]);
@@ -41,7 +45,14 @@ function DatasetDetail() {
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const [savedPulseKey, setSavedPulseKey] = useState("");
   const [cellError, setCellError] = useState(null);
-  const [focusRecordId, setFocusRecordId] = useState(null);
+  const recordParam = Number(searchParams.get("record"));
+  const linkedRecordId = Number.isInteger(recordParam) && recordParam > 0 ? recordParam : null;
+  const [focusRecordId, setFocusRecordId] = useState(linkedRecordId);
+  const [seenLink, setSeenLink] = useState(linkedRecordId);
+  if (linkedRecordId !== seenLink) {
+    setSeenLink(linkedRecordId);
+    if (linkedRecordId) setFocusRecordId(linkedRecordId);
+  }
   const [workflowTab, setWorkflowTab] = useState("all");
   const [workflowBusy, setWorkflowBusy] = useState(null);
   const [columnModal, setColumnModal] = useState(null);
@@ -463,6 +474,8 @@ function DatasetDetail() {
         onDeleteColumn={setDeleteColumn}
         isAdmin={admin}
         canVerify={canVerify}
+        canDeleteRows={canDeleteRows}
+        roleLabel={roleLabel}
         workflowTab={workflowTab}
         workflowBusy={workflowBusy}
         onValidate={(record) => runWorkflow(record, "validate", { isValidated: true }, "Record validated")}

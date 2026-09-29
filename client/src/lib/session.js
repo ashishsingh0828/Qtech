@@ -13,13 +13,29 @@ export function formatRole(role) {
   const normalized = String(role).toLowerCase().replace(/[_-]+/g, " ").trim();
   if (normalized === "admin") return "Admin";
   if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
-    return "Managing Person";
+    return "Manager";
   }
+  if (normalized === "validator") return "Validator";
+  if (normalized === "service") return "Service";
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 export function isAdminRole(role) {
   return formatRole(role) === "Admin";
+}
+
+export function canDeleteRole(role) {
+  const label = formatRole(role);
+  return label === "Admin" || label === "Manager";
+}
+
+export function roleBadgeClass(role) {
+  const label = formatRole(role);
+  if (label === "Admin") return "role-badge role-admin";
+  if (label === "Manager") return "role-badge role-manager";
+  if (label === "Validator") return "role-badge role-validator";
+  if (label === "Service") return "role-badge role-service";
+  return "role-badge";
 }
 
 export function authConfig() {

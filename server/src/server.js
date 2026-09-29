@@ -9,6 +9,7 @@ const { getWorkspaceAuditLogs } = require("./controllers/datasetController");
 const authRoutes = require("./routes/authRoutes");
 const datasetRoutes = require("./routes/datasetRoutes");
 const userRoutes = require("./routes/userRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/datasets", datasetRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.get("/api/audit-logs", requireAuth, getWorkspaceAuditLogs);
 
 ensureSchema().catch((error) => {

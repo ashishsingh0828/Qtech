@@ -1,5 +1,7 @@
 const pool = require("../config/db");
 const { canonicalRole } = require("../middleware/auth");
+const { canDeleteFiles, roleCanEditField, notifiesLeadership } = require("../constants/access");
+const { notifyLeadership } = require("./notificationController");
 const { ensureSchema } = require("../database/ensure");
 const { ensureMasterFields, MASTER_FIELDS } = require("../constants/masterFields");
 
@@ -36,6 +38,7 @@ function parseAggregatedValues(value) {
 async function listAccessibleFields(datasetId, user) {
   await ensureSchema();
   const admin = isAdmin(user);
+  const seeAll = admin || canonicalRole(user?.role) === "Manager";
   const userId = Number(user?.id) || 0;
   const result = await pool.query(
     `
@@ -47,6 +50,7 @@ async function listAccessibleFields(datasetId, user) {
       f.field_type,
       f.position,
       f.is_required,
+      f.group_name,
       f.created_at,
       CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_view, TRUE) END AS can_view,
       CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_edit, TRUE) END AS can_edit
@@ -59,9 +63,17 @@ async function listAccessibleFields(datasetId, user) {
       AND ($3::boolean OR COALESCE(fp.can_view, TRUE) = TRUE)
     ORDER BY f.position ASC, f.id ASC
     `,
-    [datasetId, userId, admin]
+    [datasetId, userId, seeAll]
   );
-  return result.rows;
+  return result.rows.map((field) => ({
+    ...field,
+    can_edit: roleCanEditField(user, field) && (seeAll || field.can_edit !== false),
+    can_view: seeAll ? true : field.can_view,
+  }));
+}
+
+function isManagerUser(user) {
+  return canonicalRole(user?.role) === "Manager";
 }
 
 async function assertCanEditField(client, user, fieldId) {
@@ -142,10 +154,50 @@ const getDatasets = async (req, res) => {
         ) AS total_records,
         (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS active_users
     `);
+    const workflowRows = await pool.query(`
+      SELECT
+        MAX(rv.value) FILTER (
+          WHERE lower(regexp_replace(f.name, '[^a-zA-Z0-9]', '', 'g')) IN ('validated', 'validatedyesno')
+        ) AS validated,
+        MAX(rv.value) FILTER (
+          WHERE lower(regexp_replace(f.name, '[^a-zA-Z0-9]', '', 'g')) = 'bywhendatawillbevalidated'
+        ) AS due_on,
+        MAX(rv.value) FILTER (
+          WHERE lower(regexp_replace(f.name, '[^a-zA-Z0-9]', '', 'g')) = 'verificationstatus'
+        ) AS verification,
+        MAX(rv.value) FILTER (
+          WHERE lower(regexp_replace(f.name, '[^a-zA-Z0-9]', '', 'g')) = 'status'
+        ) AS status
+      FROM records r
+      JOIN datasets d ON d.id = r.dataset_id AND d.is_deleted = FALSE
+      LEFT JOIN record_values rv ON rv.record_id = r.id
+      LEFT JOIN fields f ON f.id = rv.field_id AND f.is_deleted = FALSE
+      WHERE r.is_deleted = FALSE
+      GROUP BY r.id
+    `);
+    const today = new Date().toISOString().slice(0, 10);
+    let validationOverdue = 0;
+    let pendingVerifications = 0;
+    let activeAmcs = 0;
+    for (const row of workflowRows.rows) {
+      const validated = String(row.validated || "").trim().toLowerCase();
+      const isValidated = validated === "yes" || validated === "true";
+      const due = String(row.due_on || "").slice(0, 10);
+      if (!isValidated && /^\d{4}-\d{2}-\d{2}$/.test(due) && due < today) validationOverdue += 1;
+      if (isValidated && String(row.verification || "").trim().toLowerCase() !== "verified ok") pendingVerifications += 1;
+      const status = String(row.status || "").trim().toLowerCase();
+      if (status === "amc" || status === "in warranty") activeAmcs += 1;
+    }
 
     res.json({
       datasets: result.rows,
-      stats: statsResult.rows[0],
+      stats: {
+        ...statsResult.rows[0],
+        total_equipment: statsResult.rows[0]?.total_records ?? 0,
+        validation_overdue: validationOverdue,
+        pending_verifications: pendingVerifications,
+        active_amcs: activeAmcs,
+      },
     });
   } catch (error) {
     console.error("Get datasets error:", error);
@@ -739,6 +791,10 @@ const deleteRecord = async (req, res) => {
     return res.status(400).json({ error: "Invalid record id" });
   }
 
+  if (!canDeleteFiles(req.user)) {
+    return res.status(403).json({ error: "You do not have permission to delete rows" });
+  }
+
   try {
     const result = await pool.query(
       "DELETE FROM records WHERE id = $1 AND dataset_id = $2 RETURNING id",
@@ -796,7 +852,7 @@ const updateCell = async (req, res) => {
 
     const fieldResult = await client.query(
       `
-      SELECT id, name, field_type, is_required
+      SELECT id, name, field_key, field_type, is_required, group_name
       FROM fields
       WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
       `,
@@ -809,7 +865,11 @@ const updateCell = async (req, res) => {
     }
 
     const field = fieldResult.rows[0];
-    const allowed = await assertCanEditField(client, req.user, fieldId);
+    if (!roleCanEditField(req.user, field)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "You do not have permission to edit this column" });
+    }
+    const allowed = isManagerUser(req.user) || await assertCanEditField(client, req.user, fieldId);
     if (!allowed) {
       await client.query("ROLLBACK");
       return res.status(403).json({ error: "You do not have permission to edit this column" });
@@ -893,6 +953,16 @@ const updateCell = async (req, res) => {
       `,
       [changedBy, recordId]
     );
+
+    if (notifiesLeadership(req.user, field)) {
+      const datasetName = await client.query("SELECT name FROM datasets WHERE id = $1", [datasetId]);
+      await notifyLeadership(client, {
+        message: `${req.user?.email || "A teammate"} updated ${field.name} on ${datasetName.rows[0]?.name || "a dataset"}`,
+        datasetId,
+        recordId,
+        actorId: changedBy,
+      });
+    }
 
     await client.query("COMMIT");
 

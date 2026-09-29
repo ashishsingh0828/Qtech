@@ -1,37 +1,63 @@
+const { ensureSchema } = require("../database/ensure");
+
+function pmsColumns() {
+  const columns = [{ name: "Total PMS", field_type: "text", group: "Schedule Services", aliases: ["total pm", "pms total"] }];
+  for (let index = 1; index <= 15; index += 1) {
+    columns.push({
+      name: `PMS ${index}`,
+      field_type: "text",
+      group: "Schedule Services",
+      aliases: [`pms${index}`, `pm ${index}`],
+    });
+  }
+  for (let index = 1; index <= 14; index += 1) {
+    columns.push({
+      name: index === 1 ? "PM Date" : `PM Date ${index}`,
+      field_type: "date",
+      group: "Schedule Services",
+      aliases: index === 1 ? ["pm date 1", "pm date1", "pmdates"] : [`pm date${index}`, `pmdate ${index}`, `pm date ${index}`],
+    });
+  }
+  return columns;
+}
+
 const MASTER_FIELDS = [
-  { name: "SR No", field_type: "text", aliases: ["sr. no", "sr no.", "sr number", "s.r. no"] },
-  { name: "Customer Name", field_type: "text", aliases: ["customer", "client name"] },
-  { name: "City", field_type: "text", aliases: [] },
-  { name: "Contact Person", field_type: "text", aliases: ["contact name"] },
-  { name: "Mobile No", field_type: "text", aliases: ["mobile", "mobile number", "mobile no.", "phone", "phone no", "contact number"] },
-  { name: "Email", field_type: "email", aliases: ["email id", "e-mail", "email address"] },
-  { name: "Location", field_type: "text", aliases: ["site location"] },
-  { name: "Contract Type", field_type: "text", aliases: ["contract", "amc / cmc / warranty"] },
-  { name: "Equipment Name", field_type: "text", aliases: ["instrument name", "equipment"] },
-  { name: "Serial No", field_type: "text", aliases: ["serial number", "serial no.", "equipment serial no"] },
-  { name: "Start Date", field_type: "date", aliases: ["amc start date", "contract start date"] },
-  { name: "Month", field_type: "text", aliases: [] },
-  { name: "Year", field_type: "text", aliases: [] },
-  { name: "End Date", field_type: "date", aliases: ["amc end date", "contract end date"] },
-  { name: "Status", field_type: "text", aliases: ["warranty status", "amc status"] },
-  { name: "Validated", field_type: "text", aliases: ["is validated"] },
-  { name: "Validated By", field_type: "text", aliases: ["validated by name"] },
-  { name: "Validation Date", field_type: "text", aliases: ["validated on", "validation timestamp"] },
-  { name: "Verified By", field_type: "text", aliases: ["verified by name", "manager name"] },
-  { name: "Verified Date", field_type: "text", aliases: ["verified on"] },
-  { name: "Verification Status", field_type: "text", aliases: ["verified status"] },
-  { name: "Proposal Sent", field_type: "text", aliases: ["proposal status"] },
-  { name: "Proposal Sent Date", field_type: "date", aliases: ["proposal date"] },
-  { name: "Proposal Acknowledged", field_type: "text", aliases: ["proposal ack", "acknowledged"] },
-  { name: "Acknowledged By", field_type: "text", aliases: ["ack by", "acknowledged by name"] },
-  { name: "Follow-up Date", field_type: "date", aliases: ["follow up date", "followup date", "next follow-up", "next contact date"] },
-  { name: "Total PMS", field_type: "text", aliases: ["total pm", "pms total"] },
-  { name: "PMS 1", field_type: "text", aliases: ["pms1", "pm 1"] },
-  { name: "PM Date 1", field_type: "date", aliases: ["pm date1", "pms date 1", "pm date-1"] },
-  { name: "PMS 2", field_type: "text", aliases: ["pms2", "pm 2"] },
-  { name: "PM Date 2", field_type: "date", aliases: ["pm date2", "pms date 2", "pm date-2"] },
-  { name: "Customer Complaint", field_type: "text", aliases: ["complaint"] },
-  { name: "Service Remarks", field_type: "text", aliases: ["remarks", "service remark"] },
+  { name: "SR. No", field_type: "text", group: "Customer Detail", aliases: ["sr no", "sr. no", "sr no.", "sr number", "s.r. no"] },
+  { name: "Customer Name", field_type: "text", group: "Customer Detail", aliases: ["customer", "client name"] },
+  { name: "City", field_type: "text", group: "Customer Detail", aliases: [] },
+  { name: "Contact Person", field_type: "text", group: "Customer Detail", aliases: ["contact name"] },
+  { name: "Mobile No", field_type: "text", group: "Customer Detail", aliases: ["mobile", "mobile number", "mobile no.", "phone", "phone no"] },
+  { name: "Email", field_type: "email", group: "Customer Detail", aliases: ["email id", "e-mail", "email address"] },
+  { name: "Location", field_type: "text", group: "Customer Detail", aliases: ["site location"] },
+  { name: "Contract Type", field_type: "text", group: "Instrument Details", aliases: ["contract", "amc / cmc / warranty"] },
+  { name: "Euipment Name", field_type: "text", group: "Instrument Details", aliases: ["equipment name", "instrument name", "equipment"] },
+  { name: "Serial NO:", field_type: "text", group: "Instrument Details", aliases: ["serial no", "serial number", "serial no.", "equipment serial no"] },
+  { name: "Start Date", field_type: "date", group: "Instrument Details", aliases: ["amc start date", "contract start date"] },
+  { name: "Month", field_type: "text", group: "Instrument Details", aliases: [] },
+  { name: "Year", field_type: "text", group: "Instrument Details", aliases: [] },
+  { name: "End Date", field_type: "date", group: "Instrument Details", aliases: ["amc end date", "contract end date"] },
+  { name: "Status", field_type: "text", group: "Instrument Details", aliases: ["warranty status", "amc status"] },
+  { name: "Final Status", field_type: "text", group: "Instrument Details", aliases: [] },
+  { name: "Validated (Yes/No)", field_type: "text", group: "Data Validation", aliases: ["validated", "is validated", "validated yes/no"] },
+  { name: "Validated by", field_type: "text", group: "Data Validation", aliases: ["validated by", "validated by name"] },
+  { name: "Validation Date", field_type: "text", group: "Data Validation", aliases: ["validated on", "validation timestamp"] },
+  { name: "By when Data will be validated", field_type: "date", group: "Data Validation", aliases: ["expected validation date", "validation due"] },
+  { name: "Days", field_type: "text", group: "Data Validation", aliases: ["contract days"] },
+  { name: "Reason for Rejection", field_type: "text", group: "Data Validation", aliases: ["reason", "rejection reason"] },
+  { name: "Verified By", field_type: "text", group: "Data Validation", aliases: ["verified by name", "manager name"] },
+  { name: "Verified Date", field_type: "text", group: "Data Validation", aliases: ["verified on"] },
+  { name: "Verification Status", field_type: "text", group: "Data Validation", aliases: ["verified status"] },
+  ...pmsColumns(),
+  { name: "Customer Complaint", field_type: "text", group: "Compaint", aliases: ["complaint"] },
+  { name: "Service Remarks", field_type: "text", group: "Compaint", aliases: ["remarks", "service remark"] },
+  { name: "Call Date", field_type: "date", group: "Breakdown Calls", aliases: ["breakdown date"] },
+  { name: "Breakdown Details", field_type: "text", group: "Breakdown Calls", aliases: ["breakdown"] },
+  { name: "Attended By", field_type: "text", group: "Breakdown Calls", aliases: ["attended"] },
+  { name: "Proposal Sent", field_type: "text", group: "AMC", aliases: ["proposal status"] },
+  { name: "Proposal Sent Date", field_type: "date", group: "AMC", aliases: ["proposal date"] },
+  { name: "Proposal Acknowledged", field_type: "text", group: "AMC", aliases: ["proposal ack", "acknowledged"] },
+  { name: "Acknowledged By", field_type: "text", group: "AMC", aliases: ["ack by", "acknowledged by name"] },
+  { name: "Follow-up Date", field_type: "date", group: "Follow up", aliases: ["follow up date", "followup date", "next follow-up", "next contact date"] },
 ];
 
 function compact(value) {
@@ -51,7 +77,7 @@ const SPEC_BY_KEY = new Map();
 for (const spec of MASTER_FIELDS) {
   SPEC_BY_KEY.set(compact(spec.name), spec);
   SPEC_BY_KEY.set(compact(slug(spec.name)), spec);
-  for (const alias of spec.aliases) SPEC_BY_KEY.set(compact(alias), spec);
+  for (const alias of spec.aliases || []) SPEC_BY_KEY.set(compact(alias), spec);
 }
 
 function specForHeader(header) {
@@ -89,6 +115,7 @@ function uniqueKey(base, used) {
 }
 
 async function ensureMasterFields(db, datasetId) {
+  await ensureSchema();
   const existing = await db.query(
     `
     SELECT id, name, field_key, field_type, position, is_deleted
@@ -107,6 +134,7 @@ async function ensureMasterFields(db, datasetId) {
     missing.push({
       name: spec.name,
       fieldType: spec.field_type,
+      groupName: spec.group || "",
       fieldKey: uniqueKey(slug(spec.name) || "column", usedKeys),
       position: nextPosition,
     });
@@ -117,13 +145,13 @@ async function ensureMasterFields(db, datasetId) {
 
   const params = [];
   const placeholders = missing.map((spec, index) => {
-    const offset = index * 5;
-    params.push(datasetId, spec.name, spec.fieldKey, spec.fieldType, spec.position);
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, FALSE)`;
+    const offset = index * 6;
+    params.push(datasetId, spec.name, spec.fieldKey, spec.fieldType, spec.position, spec.groupName || null);
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, FALSE, $${offset + 6})`;
   });
   await db.query(
     `
-    INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required)
+    INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required, group_name)
     VALUES ${placeholders.join(", ")}
     ON CONFLICT (dataset_id, field_key) DO NOTHING
     `,

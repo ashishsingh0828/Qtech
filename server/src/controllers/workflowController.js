@@ -2,10 +2,11 @@ const pool = require("../config/db");
 const { canonicalRole } = require("../middleware/auth");
 const { ensureSchema } = require("../database/ensure");
 const { ensureMasterFields, findMasterField } = require("../constants/masterFields");
+const { notifyLeadership } = require("./notificationController");
 
 function canVerify(user) {
   const role = canonicalRole(user?.role);
-  return role === "Admin" || role === "Managing Person";
+  return role === "Admin" || role === "Manager";
 }
 
 function parseDate(value, label) {
@@ -171,22 +172,71 @@ function ids(req) {
 const validateRecord = async (req, res) => {
   const parsed = ids(req);
   if (parsed.error) return res.status(parsed.error.status).json({ error: parsed.error.message });
-  if (typeof req.body?.isValidated !== "boolean") {
-    return res.status(400).json({ error: "isValidated must be true or false" });
+  const flag = String(req.body?.isValidated ?? "").trim().toLowerCase();
+  const yes = flag === "yes" || req.body?.isValidated === true;
+  const no = flag === "no" || req.body?.isValidated === false;
+  if (!yes && !no) {
+    return res.status(400).json({ error: "isValidated must be Yes or No" });
+  }
+  const rejectionReason = String(req.body?.rejectionReason ?? req.body?.remarks ?? "").trim();
+  const expected = req.body?.expectedValidationDate;
+  if (expected != null && expected !== "" && typeof parseDate(expected, "expectedValidationDate") === "object") {
+    return res.status(400).json({ error: parseDate(expected, "expectedValidationDate").error });
   }
   await ensureSchema();
-  const remarksProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "remarks");
-  const remarks = remarksProvided ? String(req.body.remarks ?? "").trim() : null;
 
-  return applyChanges(res, parsed.datasetId, parsed.recordId, parsed.userId, (context) => {
-    const changes = [
-      { name: "Validated", value: req.body.isValidated ? "Yes" : "No" },
-      { name: "Validated By", value: context.actorName },
-      { name: "Validation Date", value: context.stamp },
-    ];
-    if (remarksProvided) changes.push({ name: "Service Remarks", value: remarks });
-    return changes;
-  });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const context = await loadWorkflowContext(client, parsed.datasetId, parsed.recordId, parsed.userId);
+    if (context.error) {
+      await client.query("ROLLBACK");
+      return res.status(context.error.status).json({ error: context.error.message });
+    }
+    const changes = yes
+      ? [
+          { name: "Validated (Yes/No)", value: "Yes" },
+          { name: "Validated by", value: context.actorName },
+          { name: "Validation Date", value: context.stamp },
+        ]
+      : [
+          { name: "Validated (Yes/No)", value: "No" },
+          { name: "Reason for Rejection", value: rejectionReason },
+          { name: "By when Data will be validated", value: expected ? String(expected).slice(0, 10) : "" },
+        ];
+    const values = {};
+    for (const change of changes) {
+      const field = findMasterField(context.fields, change.name);
+      if (!field) {
+        await client.query("ROLLBACK");
+        return res.status(500).json({ error: `Column ${change.name} is not available` });
+      }
+      await writeTrackedValue(client, parsed.recordId, field, change.value, parsed.userId);
+      values[field.field_key] = change.value == null ? "" : String(change.value);
+    }
+    await notifyLeadership(client, {
+      message: `${context.actorName} marked a record ${yes ? "validated" : "not validated"}`,
+      datasetId: parsed.datasetId,
+      recordId: parsed.recordId,
+      actorId: parsed.userId,
+    });
+    await client.query(
+      "UPDATE records SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+      [parsed.userId, parsed.recordId]
+    );
+    await client.query("COMMIT");
+    return res.json({ success: true, values });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback error:", rollbackError);
+    }
+    console.error("Validate record error:", error);
+    return res.status(500).json({ error: "Unable to validate this record" });
+  } finally {
+    client.release();
+  }
 };
 
 const verifyRecord = async (req, res) => {

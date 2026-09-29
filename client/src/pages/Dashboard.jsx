@@ -21,9 +21,11 @@ function formatRole(role) {
   const normalized = String(role).toLowerCase().replace(/[_-]+/g, " ").trim();
 
   if (normalized === "admin") return "Admin";
-  if (normalized === "managing person" || normalized === "managingperson") {
-    return "Managing Person";
+  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
+    return "Manager";
   }
+  if (normalized === "validator") return "Validator";
+  if (normalized === "service") return "Service";
 
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
@@ -88,6 +90,7 @@ function Dashboard() {
   const { notify } = useToast();
   const sessionUser = readUser();
   const isAdmin = formatRole(sessionUser?.role) === "Admin";
+  const canDelete = formatRole(sessionUser?.role) === "Admin" || formatRole(sessionUser?.role) === "Manager";
   const [searchParams] = useSearchParams();
   const datasetQuery = (searchParams.get("q") || "").trim().toLowerCase();
 
@@ -371,16 +374,20 @@ function Dashboard() {
 
           <div className="stats-banner">
             <article>
-              <span>Total Datasets</span>
-              <strong>{stats.total_datasets ?? 0}</strong>
+              <span>Total Equipment</span>
+              <strong>{stats.total_equipment ?? stats.total_records ?? 0}</strong>
             </article>
             <article>
-              <span>Total Records</span>
-              <strong>{stats.total_records ?? 0}</strong>
+              <span>Validation Overdue</span>
+              <strong>{stats.validation_overdue ?? 0}</strong>
             </article>
             <article>
-              <span>Active Users</span>
-              <strong>{stats.active_users ?? 0}</strong>
+              <span>Pending Verifications</span>
+              <strong>{stats.pending_verifications ?? 0}</strong>
+            </article>
+            <article>
+              <span>Active AMCs</span>
+              <strong>{stats.active_amcs ?? 0}</strong>
             </article>
           </div>
 
@@ -465,7 +472,7 @@ function Dashboard() {
                                 Rename
                               </button>
                             ) : null}
-                            {isAdmin && !dataset.is_deleted ? (
+                            {canDelete && !dataset.is_deleted ? (
                               <button
                                 className="menu-danger"
                                 type="button"
@@ -476,7 +483,7 @@ function Dashboard() {
                                 }}
                               >
                                 <Trash2 size={14} aria-hidden="true" />
-                                Archive / Delete
+                                Delete Dataset
                               </button>
                             ) : null}
                             {isAdmin && dataset.is_deleted ? (
@@ -502,6 +509,25 @@ function Dashboard() {
                       <span className="count-badge">{dataset.records_count ?? 0} records</span>
                       <span className="count-badge">{dataset.fields_count ?? 0} columns</span>
                     </div>
+                    {!dataset.is_deleted ? (
+                      <div className="file-card-actions">
+                        <button type="button" onClick={() => navigate(`/datasets/${dataset.id}`)}>
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          disabled={downloadingId === dataset.id}
+                          onClick={() => handleDownload(dataset)}
+                        >
+                          {downloadingId === dataset.id ? "Exporting…" : "Export (.xlsx)"}
+                        </button>
+                        {canDelete ? (
+                          <button className="is-danger" type="button" onClick={() => setDeleteTarget(dataset)}>
+                            Delete Dataset
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="file-card-foot">
                       <span className="avatar" title={author || "Unknown"}>
                         {initials(author)}
