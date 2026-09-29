@@ -342,11 +342,10 @@ function DatasetDetail() {
     }
   }
 
-  async function confirmImport(file, mapping) {
+  async function confirmImport(file) {
     const form = new FormData();
     form.append("file", file);
-    form.append("mapping", JSON.stringify(mapping));
-    form.append("createMissing", mapping.some((item) => item.action === "create") ? "true" : "false");
+    form.append("createMissing", "true");
     try {
       const { data } = await axios.post(`${API_BASE}/api/datasets/${id}/import-excel`, form, authConfig());
       setImportOpen(false);
@@ -497,7 +496,6 @@ function DatasetDetail() {
       <ExcelImportModal
         key={importKey}
         open={importOpen}
-        canCreateColumns={admin}
         onClose={() => setImportOpen(false)}
         onPreview={previewWorkbook}
         onConfirm={confirmImport}

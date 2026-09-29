@@ -222,7 +222,9 @@
 .grid-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .grid-table {
@@ -236,8 +238,8 @@
 
 .grid-table th,
 .grid-table td {
-  height: 40px;
-  padding: 8px 12px;
+  height: 32px;
+  padding: 6px 12px;
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
   background: #ffffff;
@@ -761,6 +763,14 @@
   background: #eef2ff;
 }
 
+.import-lead {
+  margin: 6px 0 0;
+  max-width: 46rem;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .import-summary {
   margin-top: 16px;
   padding: 14px 16px;
@@ -768,6 +778,34 @@
   background: #f8fafc;
   color: #1e293b;
   font-size: 15px;
+}
+
+.import-card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.import-file {
+  margin: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.import-card .import-summary {
+  margin-top: 4px;
+  padding: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.import-card .preview-scroll {
+  max-height: 180px;
 }
 
 .preview-scroll {

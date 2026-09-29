@@ -16,36 +16,62 @@ function cellToString(value) {
   return String(value).trim();
 }
 
+function isIgnoredHeader(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  const numbered = text.match(/^column\s*(\d+)\+?$/i);
+  if (numbered && Number(numbered[1]) >= 200) return true;
+  return false;
+}
+
 function readSheet(buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheetStubs: false });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
     return { headers: [], rows: [], sheetName: "" };
   }
 
-  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-    header: 1,
-    defval: "",
-    raw: true,
-    blankrows: false,
-  });
+  const sheet = workbook.Sheets[sheetName];
+  const cells = new Map();
+  let maxRow = -1;
+  let lastHeaderCol = -1;
 
-  if (!matrix.length) {
-    return { headers: [], rows: [] };
+  for (const key of Object.keys(sheet)) {
+    if (key.charAt(0) === "!") continue;
+    const text = cellToString(sheet[key]?.v);
+    if (!text) continue;
+    const address = XLSX.utils.decode_cell(key);
+    cells.set(`${address.r}:${address.c}`, text);
+    if (address.r > maxRow) maxRow = address.r;
+    if (address.r === 0 && !isIgnoredHeader(text) && address.c > lastHeaderCol) {
+      lastHeaderCol = address.c;
+    }
+  }
+
+  if (lastHeaderCol < 0) {
+    return { headers: [], rows: [], sheetName };
+  }
+
+  const usedCols = [];
+  for (let col = 0; col <= lastHeaderCol; col += 1) {
+    const header = cells.get(`0:${col}`) || "";
+    if (isIgnoredHeader(header)) continue;
+    usedCols.push(col);
   }
 
   const seen = new Map();
-  const headers = matrix[0].map((cell, index) => {
-    const label = cellToString(cell) || `Column ${index + 1}`;
+  const headers = usedCols.map((col) => {
+    const label = cells.get(`0:${col}`);
     const count = seen.get(label) || 0;
     seen.set(label, count + 1);
     return count === 0 ? label : `${label} (${count + 1})`;
   });
 
-  const rows = matrix
-    .slice(1)
-    .map((row) => headers.map((_, index) => cellToString(row[index])))
-    .filter((row) => row.some((cell) => cell !== ""));
+  const rows = [];
+  for (let row = 1; row <= maxRow; row += 1) {
+    const record = usedCols.map((col) => cells.get(`${row}:${col}`) || "");
+    if (record.some((cell) => cell !== "")) rows.push(record);
+  }
 
   return { headers, rows, sheetName };
 }
@@ -60,16 +86,6 @@ function matchHeader(header, fields) {
       return raw === name || raw === fieldKey || (key && key === fieldKey);
     }) || null
   );
-}
-
-function inferFieldType(values) {
-  const present = values.map((value) => String(value || "").trim()).filter(Boolean);
-  if (!present.length) return "text";
-  if (present.every((value) => /^(true|false|yes|no)$/i.test(value))) return "boolean";
-  if (present.every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))) return "date";
-  if (present.every((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) return "email";
-  if (present.every((value) => Number.isFinite(Number(value)))) return "number";
-  return "text";
 }
 
 function uniqueFieldKey(baseKey, used) {
@@ -143,7 +159,7 @@ const previewExcel = async (req, res) => {
       });
     });
 
-    const preview = rows.slice(0, 5).map((row) => {
+    const preview = rows.slice(0, 3).map((row) => {
       const record = {};
       headers.forEach((header, index) => {
         record[header] = row[index] ?? "";
@@ -189,10 +205,10 @@ const importExcel = async (req, res) => {
     }
   }
 
-  const wantsNewColumns = explicitMapping
-    ? explicitMapping.some((item) => item?.action === "create")
-    : createMissing;
-  if (wantsNewColumns && canonicalRole(req.user?.role) !== "Admin") {
+  const directImport = !explicitMapping;
+  const createMissingColumns = directImport || createMissing;
+  const wantsExplicitCreate = Boolean(explicitMapping?.some((item) => item?.action === "create"));
+  if (wantsExplicitCreate && canonicalRole(req.user?.role) !== "Admin") {
     return res.status(403).json({ error: "Only an Admin can create columns" });
   }
 
@@ -235,32 +251,31 @@ const importExcel = async (req, res) => {
 
     const fieldsResult = await client.query(
       `
-      SELECT id, name, field_key, field_type, position, is_required
+      SELECT id, name, field_key, field_type, position, is_required, is_deleted
       FROM fields
-      WHERE dataset_id = $1 AND is_deleted = FALSE
+      WHERE dataset_id = $1
       ORDER BY position ASC, id ASC
       `,
       [datasetId]
     );
 
-    let fields = fieldsResult.rows;
+    const fields = fieldsResult.rows.filter((field) => !field.is_deleted);
+    let editableIds = null;
     if (canonicalRole(req.user?.role) !== "Admin") {
       const accessible = await listAccessibleFields(datasetId, req.user);
-      const editableIds = new Set(
+      editableIds = new Set(
         accessible.filter((field) => field.can_edit).map((field) => Number(field.id))
       );
-      fields = fields.filter((field) => editableIds.has(Number(field.id)));
     }
-    const usedKeys = new Set(fields.map((field) => field.field_key));
+    const usedKeys = new Set(fieldsResult.rows.map((field) => field.field_key));
     let nextPosition =
-      fields.reduce((max, field) => Math.max(max, Number(field.position) || 0), -1) + 1;
+      fieldsResult.rows.reduce((max, field) => Math.max(max, Number(field.position) || 0), -1) + 1;
 
     const mappings = [];
     const claimedFieldIds = new Set();
 
-    async function createColumn(header, index) {
-      const columnValues = rows.map((row) => row[index]);
-      const fieldType = inferFieldType(columnValues);
+    async function createColumn(header) {
+      const fieldType = "text";
       const fieldKey = uniqueFieldKey(normalizeFieldKey(header) || "column", usedKeys);
       const inserted = await client.query(
         `
@@ -283,7 +298,7 @@ const importExcel = async (req, res) => {
         const index = headerIndex.get(header);
         if (index == null || item?.action === "skip") continue;
         if (item?.action === "create") {
-          const field = await createColumn(header, index);
+          const field = await createColumn(header);
           mappings.push({ index, field });
           continue;
         }
@@ -307,17 +322,23 @@ const importExcel = async (req, res) => {
     } else {
       for (const [index, header] of headers.entries()) {
         let field = matchHeader(header, fields);
-        if (!field && createMissing) {
-          field = await createColumn(header, index);
+        if (field && editableIds && !editableIds.has(Number(field.id))) continue;
+        if (field && claimedFieldIds.has(Number(field.id))) field = null;
+        if (!field && createMissingColumns) {
+          field = await createColumn(header);
         }
-        if (field) mappings.push({ index, field });
+        if (!field) continue;
+        claimedFieldIds.add(Number(field.id));
+        mappings.push({ index, field });
       }
     }
 
     if (!mappings.length) {
       await client.query("ROLLBACK");
       return res.status(400).json({
-        error: "None of the spreadsheet headers match this dataset. Create missing columns to import them.",
+        error: directImport
+          ? "None of these columns can be written with your permissions."
+          : "None of the spreadsheet headers match this dataset.",
       });
     }
 
