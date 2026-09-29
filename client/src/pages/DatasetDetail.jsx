@@ -34,8 +34,9 @@ function DatasetDetail() {
   const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [filterFieldId, setFilterFieldId] = useState("");
-  const [filterValue, setFilterValue] = useState("");
+  const [filters, setFilters] = useState([]);
+  const [draftFieldId, setDraftFieldId] = useState("");
+  const [draftValue, setDraftValue] = useState("");
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const [savedPulseKey, setSavedPulseKey] = useState("");
   const [cellError, setCellError] = useState(null);
@@ -216,9 +217,12 @@ function DatasetDetail() {
 
   async function confirmDeleteRow() {
     if (!deleteRow) return;
+    const ids = Array.isArray(deleteRow.ids) ? deleteRow.ids : [deleteRow.id];
     setDeleting(true);
     try {
-      await axios.delete(`${API_BASE}/api/datasets/${id}/records/${deleteRow.id}`, authConfig());
+      for (const recordId of ids) {
+        await axios.delete(`${API_BASE}/api/datasets/${id}/records/${recordId}`, authConfig());
+      }
       setDeleteRow(null);
       await reloadRecords();
     } catch (err) {
@@ -338,10 +342,11 @@ function DatasetDetail() {
     }
   }
 
-  async function confirmImport(file, createMissing) {
+  async function confirmImport(file, mapping) {
     const form = new FormData();
     form.append("file", file);
-    form.append("createMissing", createMissing ? "true" : "false");
+    form.append("mapping", JSON.stringify(mapping));
+    form.append("createMissing", mapping.some((item) => item.action === "create") ? "true" : "false");
     try {
       const { data } = await axios.post(`${API_BASE}/api/datasets/${id}/import-excel`, form, authConfig());
       setImportOpen(false);
@@ -389,17 +394,24 @@ function DatasetDetail() {
         query={query}
         onQueryChange={setQuery}
         filterOpen={filterOpen}
-        filterActive={Boolean(filterFieldId && filterValue.trim())}
-        filterFieldId={filterFieldId}
-        filterValue={filterValue}
+        filters={filters}
+        draftFieldId={draftFieldId}
+        draftValue={draftValue}
         fields={fields}
         onToggleFilter={() => setFilterOpen((open) => !open)}
-        onFilterField={setFilterFieldId}
-        onFilterValue={setFilterValue}
-        onClearFilter={() => {
-          setFilterFieldId("");
-          setFilterValue("");
+        onDraftField={setDraftFieldId}
+        onDraftValue={setDraftValue}
+        onAddFilter={() => {
+          if (!draftFieldId || !draftValue.trim()) return;
+          setFilters((current) => [
+            ...current,
+            { id: `${draftFieldId}-${Date.now()}`, fieldId: draftFieldId, value: draftValue.trim() },
+          ]);
+          setDraftValue("");
+          setFilterOpen(false);
         }}
+        onRemoveFilter={(filterId) => setFilters((current) => current.filter((filter) => filter.id !== filterId))}
+        onClearFilters={() => setFilters([])}
         onAddRow={() => insertRow(null, null)}
         onAddColumn={() => openColumnModal(null, null)}
         canAddColumn={admin}
@@ -424,11 +436,14 @@ function DatasetDetail() {
         records={records}
         loading={loading}
         query={query}
-        filterFieldId={filterFieldId}
-        filterValue={filterValue}
+        filters={filters}
         onSaveCell={saveCell}
         onInsertRow={insertRow}
-        onDeleteRow={setDeleteRow}
+        onDeleteRow={(record) => setDeleteRow(record)}
+        onDeleteRows={(rows) => {
+          if (!rows.length) return;
+          setDeleteRow({ ids: rows.map((row) => row.id), count: rows.length });
+        }}
         onInsertColumn={(field, placement) => openColumnModal(field, placement)}
         onDeleteColumn={setDeleteColumn}
         isAdmin={admin}
@@ -565,8 +580,8 @@ function DatasetDetail() {
       {deleteRow ? (
         <div className="modal-backdrop" onClick={() => { if (!deleting) setDeleteRow(null); }}>
           <div className="modal-panel" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <h2>Delete this row?</h2>
-            <p>The row and its cell values will be removed.</p>
+            <h2>{Array.isArray(deleteRow.ids) && deleteRow.ids.length > 1 ? `Delete ${deleteRow.ids.length} rows?` : "Delete this row?"}</h2>
+            <p>The selected rows and their cell values will be removed.</p>
             <div className="modal-actions">
               <button className="ghost-button" type="button" onClick={() => setDeleteRow(null)} disabled={deleting}>Cancel</button>
               <button className="delete-link" type="button" onClick={confirmDeleteRow} disabled={deleting}>{deleting ? "Deleting…" : "Delete row"}</button>

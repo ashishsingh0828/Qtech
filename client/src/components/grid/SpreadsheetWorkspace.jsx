@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -94,11 +94,11 @@ function SpreadsheetWorkspace({
   records,
   loading,
   query,
-  filterFieldId,
-  filterValue,
+  filters,
   onSaveCell,
   onInsertRow,
   onDeleteRow,
+  onDeleteRows,
   onInsertColumn,
   onDeleteColumn,
   isAdmin,
@@ -113,11 +113,13 @@ function SpreadsheetWorkspace({
   const [sort, setSort] = useState(null);
   const [columnMenu, setColumnMenu] = useState(null);
   const [rowMenu, setRowMenu] = useState(null);
+  const [checkedIds, setCheckedIds] = useState([]);
+  const [columnWidths, setColumnWidths] = useState({});
   const gridRef = useRef(null);
+  const scrollPos = useRef({ top: 0, left: 0 });
 
   const needle = query.trim().toLowerCase();
-  const filterField = fields.find((field) => String(field.id) === String(filterFieldId)) || null;
-  const filterNeedle = filterValue.trim().toLowerCase();
+  const activeFilters = (filters || []).filter((filter) => filter.fieldId && String(filter.value || "").trim());
   const filtered = records.filter((record) => {
     if (needle) {
       const matches = fields.some((field) => {
@@ -126,11 +128,13 @@ function SpreadsheetWorkspace({
       });
       if (!matches) return false;
     }
-    if (filterField && filterNeedle) {
-      const raw = record.values?.[filterField.field_key];
-      return cellText(filterField, raw).toLowerCase().includes(filterNeedle) || String(raw ?? "").toLowerCase().includes(filterNeedle);
-    }
-    return true;
+    return activeFilters.every((filter) => {
+      const field = fields.find((entry) => String(entry.id) === String(filter.fieldId));
+      if (!field) return true;
+      const raw = record.values?.[field.field_key];
+      const needleValue = String(filter.value).trim().toLowerCase();
+      return cellText(field, raw).toLowerCase().includes(needleValue) || String(raw ?? "").toLowerCase().includes(needleValue);
+    });
   });
   const viewRecords = sort
     ? [...filtered].sort((left, right) => {
@@ -151,6 +155,52 @@ function SpreadsheetWorkspace({
     if (!focusRecordId) return;
     gridRef.current?.focus();
   }, [focusRecordId]);
+
+  useLayoutEffect(() => {
+    const node = gridRef.current;
+    if (!node) return;
+    if (node.scrollTop !== scrollPos.current.top) node.scrollTop = scrollPos.current.top;
+    if (node.scrollLeft !== scrollPos.current.left) node.scrollLeft = scrollPos.current.left;
+  });
+
+  function rememberScroll() {
+    const node = gridRef.current;
+    if (!node) return;
+    scrollPos.current = { top: node.scrollTop, left: node.scrollLeft };
+  }
+
+  function columnWidth(fieldId) {
+    return columnWidths[fieldId] || 180;
+  }
+
+  function beginResize(fieldId, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = columnWidth(fieldId);
+    function onMove(moveEvent) {
+      const next = Math.max(96, startWidth + moveEvent.clientX - startX);
+      setColumnWidths((current) => ({ ...current, [fieldId]: next }));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function toggleChecked(recordId) {
+    setCheckedIds((current) => (
+      current.includes(recordId) ? current.filter((id) => id !== recordId) : [...current, recordId]
+    ));
+  }
+
+  function toggleAllVisible() {
+    const visibleIds = viewRecords.map((record) => record.id);
+    const allOn = visibleIds.length > 0 && visibleIds.every((id) => checkedIds.includes(id));
+    setCheckedIds(allOn ? checkedIds.filter((id) => !visibleIds.includes(id)) : [...new Set([...checkedIds, ...visibleIds])]);
+  }
 
   useEffect(() => {
     if (columnMenu == null && rowMenu == null) return undefined;
@@ -237,27 +287,48 @@ function SpreadsheetWorkspace({
     ? `${columnLetter(selection.fieldIndex)}${selectedIndex + 1} · ${selectedField.name}`
     : "None";
 
-  function sortAscending(field) {
-    setSort({ fieldId: field.id, direction: "asc" });
+  function sortColumn(field, direction) {
+    setSort({ fieldId: field.id, direction });
     setColumnMenu(null);
   }
+
+  const checkedRecords = records.filter((record) => checkedIds.includes(record.id));
+  const visibleIds = viewRecords.map((record) => record.id);
+  const allVisibleChecked = visibleIds.length > 0 && visibleIds.every((id) => checkedIds.includes(id));
 
   return (
     <>
       <div className="grid-canvas">
-        <div className="grid-scroll" ref={gridRef} tabIndex={0} onKeyDown={onGridKeyDown}>
+        <div
+          className="grid-scroll"
+          ref={gridRef}
+          tabIndex={0}
+          onKeyDown={onGridKeyDown}
+          onScroll={rememberScroll}
+        >
           <table className="grid-table">
             <thead>
               <tr>
-                <th className="row-num">#</th>
+                <th className="row-num">
+                  <label className="row-check">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleChecked}
+                      onChange={toggleAllVisible}
+                      aria-label="Select all visible rows"
+                    />
+                    <span>#</span>
+                  </label>
+                </th>
                 {fields.map((field) => {
                   const direction = sort?.fieldId === field.id ? sort.direction : "";
                   return (
-                    <th key={field.id} className="col-head" scope="col">
+                    <th key={field.id} className="col-head" scope="col" style={{ width: columnWidth(field.id) }}>
                       <div className="col-head-main">
                         <button
                           className="col-name"
                           type="button"
+                          title={field.name}
                           onClick={() => {
                             setSort((current) => {
                               if (!current || current.fieldId !== field.id) return { fieldId: field.id, direction: "asc" };
@@ -299,9 +370,13 @@ function SpreadsheetWorkspace({
                               Insert column right
                             </button>
                           ) : null}
-                          <button className="menu-item" type="button" onClick={() => sortAscending(field)}>
+                          <button className="menu-item" type="button" onClick={() => sortColumn(field, "asc")}>
                             <ArrowUp size={14} aria-hidden="true" />
                             Sort A-Z
+                          </button>
+                          <button className="menu-item" type="button" onClick={() => sortColumn(field, "desc")}>
+                            <ArrowDown size={14} aria-hidden="true" />
+                            Sort Z-A
                           </button>
                           {isAdmin ? (
                             <button className="menu-item is-danger" type="button" onClick={() => { setColumnMenu(null); onDeleteColumn(field); }}>
@@ -311,6 +386,13 @@ function SpreadsheetWorkspace({
                           ) : null}
                         </div>
                       ) : null}
+                      <span
+                        className="col-resizer"
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${field.name}`}
+                        onMouseDown={(event) => beginResize(field.id, event)}
+                      />
                     </th>
                   );
                 })}
@@ -339,6 +421,15 @@ function SpreadsheetWorkspace({
                 ? viewRecords.map((record, rowIndex) => (
                     <tr key={record.id}>
                       <td className="row-num">
+                        <label className="row-check">
+                          <input
+                            type="checkbox"
+                            checked={checkedIds.includes(record.id)}
+                            aria-label={`Select row ${rowIndex + 1}`}
+                            onChange={() => toggleChecked(record.id)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                        </label>
                         <button
                           className="row-menu-btn"
                           type="button"
@@ -380,6 +471,7 @@ function SpreadsheetWorkspace({
                           <td
                             key={field.id}
                             className={className}
+                            style={{ width: columnWidth(field.id), maxWidth: columnWidth(field.id) }}
                             onClick={() => {
                               setSelection({ recordId: record.id, fieldIndex });
                               setEditing(false);
@@ -401,9 +493,9 @@ function SpreadsheetWorkspace({
                             ) : (
                               <div className="cell-line">
                                 {tone ? (
-                                  <span className={`status-pill status-${tone}`}>{shown}</span>
+                                  <span className={`status-pill status-${tone}`} title={shown}>{shown}</span>
                                 ) : (
-                                  <span className={shown ? undefined : "cell-empty"}>{shown || "—"}</span>
+                                  <span className={shown ? "cell-clip" : "cell-empty cell-clip"} title={shown || ""}>{shown || "—"}</span>
                                 )}
                                 {locked ? <Lock className="lock-icon" size={13} aria-label="Read only" /> : null}
                                 {cellError?.key === `${record.id}:${field.id}` ? (
@@ -428,9 +520,15 @@ function SpreadsheetWorkspace({
         </div>
       </div>
       <div className="sheet-status" aria-live="polite">
-        <span>Showing <strong>{viewRecords.length}</strong> of <strong>{records.length}</strong> rows</span>
+        <span>Total Rows <strong>{records.length}</strong></span>
+        <span>Filtered Rows <strong>{viewRecords.length}</strong></span>
         <span>Selected Cell <strong>{selectedLabel}</strong></span>
-        <span>Last Sync: <strong>{syncLabel(lastSyncAt)}</strong></span>
+        <span>Sync <strong>{syncLabel(lastSyncAt)}</strong></span>
+        {checkedRecords.length ? (
+          <button className="delete-link" type="button" onClick={() => onDeleteRows(checkedRecords)}>
+            Delete {checkedRecords.length} selected
+          </button>
+        ) : null}
       </div>
     </>
   );

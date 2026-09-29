@@ -158,6 +158,13 @@ const previewExcel = async (req, res) => {
       matchedFields,
       unmatchedHeaders,
       sheetName: sheetName || "Sheet1",
+      datasetFields: loaded.fields.map((field) => ({
+        id: field.id,
+        name: field.name,
+        field_key: field.field_key,
+        field_type: field.field_type,
+        can_edit: field.can_edit !== false,
+      })),
     });
   } catch (error) {
     console.error("Preview excel error:", error);
@@ -169,8 +176,23 @@ const importExcel = async (req, res) => {
   const datasetId = parseDatasetId(req.params.id);
   const createdBy = Number(req.user?.id);
   const createMissing = String(req.body?.createMissing || "").toLowerCase() === "true";
+  let explicitMapping = null;
+  if (req.body?.mapping) {
+    try {
+      const parsed = JSON.parse(req.body.mapping);
+      if (!Array.isArray(parsed)) {
+        return res.status(400).json({ error: "Column mapping is invalid" });
+      }
+      explicitMapping = parsed;
+    } catch {
+      return res.status(400).json({ error: "Column mapping is invalid" });
+    }
+  }
 
-  if (createMissing && canonicalRole(req.user?.role) !== "Admin") {
+  const wantsNewColumns = explicitMapping
+    ? explicitMapping.some((item) => item?.action === "create")
+    : createMissing;
+  if (wantsNewColumns && canonicalRole(req.user?.role) !== "Admin") {
     return res.status(403).json({ error: "Only an Admin can create columns" });
   }
 
@@ -234,27 +256,61 @@ const importExcel = async (req, res) => {
       fields.reduce((max, field) => Math.max(max, Number(field.position) || 0), -1) + 1;
 
     const mappings = [];
+    const claimedFieldIds = new Set();
 
-    for (const [index, header] of headers.entries()) {
-      let field = matchHeader(header, fields);
-      if (!field && createMissing) {
-        const columnValues = rows.map((row) => row[index]);
-        const fieldType = inferFieldType(columnValues);
-        const fieldKey = uniqueFieldKey(normalizeFieldKey(header) || "column", usedKeys);
-        const inserted = await client.query(
-          `
-          INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required)
-          VALUES ($1, $2, $3, $4, $5, FALSE)
-          RETURNING id, name, field_key, field_type, position, is_required
-          `,
-          [datasetId, header.slice(0, 255), fieldKey, fieldType, nextPosition]
-        );
-        field = inserted.rows[0];
-        fields.push(field);
-        nextPosition += 1;
-      }
-      if (field) {
+    async function createColumn(header, index) {
+      const columnValues = rows.map((row) => row[index]);
+      const fieldType = inferFieldType(columnValues);
+      const fieldKey = uniqueFieldKey(normalizeFieldKey(header) || "column", usedKeys);
+      const inserted = await client.query(
+        `
+        INSERT INTO fields (dataset_id, name, field_key, field_type, position, is_required)
+        VALUES ($1, $2, $3, $4, $5, FALSE)
+        RETURNING id, name, field_key, field_type, position, is_required
+        `,
+        [datasetId, header.slice(0, 255), fieldKey, fieldType, nextPosition]
+      );
+      const field = inserted.rows[0];
+      fields.push(field);
+      nextPosition += 1;
+      return field;
+    }
+
+    if (explicitMapping) {
+      const headerIndex = new Map(headers.map((header, index) => [header, index]));
+      for (const item of explicitMapping) {
+        const header = String(item?.header || "");
+        const index = headerIndex.get(header);
+        if (index == null || item?.action === "skip") continue;
+        if (item?.action === "create") {
+          const field = await createColumn(header, index);
+          mappings.push({ index, field });
+          continue;
+        }
+        const fieldId = Number(item?.field_id);
+        if (!Number.isInteger(fieldId) || fieldId <= 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: `Choose a destination for ${header}` });
+        }
+        if (claimedFieldIds.has(fieldId)) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: "Each dataset column can only be mapped once" });
+        }
+        const field = fields.find((entry) => Number(entry.id) === fieldId);
+        if (!field) {
+          await client.query("ROLLBACK");
+          return res.status(403).json({ error: "You do not have permission to edit this column" });
+        }
+        claimedFieldIds.add(fieldId);
         mappings.push({ index, field });
+      }
+    } else {
+      for (const [index, header] of headers.entries()) {
+        let field = matchHeader(header, fields);
+        if (!field && createMissing) {
+          field = await createColumn(header, index);
+        }
+        if (field) mappings.push({ index, field });
       }
     }
 

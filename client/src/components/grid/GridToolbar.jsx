@@ -7,14 +7,16 @@ function GridToolbar({
   query,
   onQueryChange,
   filterOpen,
-  filterActive,
-  filterFieldId,
-  filterValue,
+  filters,
+  draftFieldId,
+  draftValue,
   fields,
   onToggleFilter,
-  onFilterField,
-  onFilterValue,
-  onClearFilter,
+  onDraftField,
+  onDraftValue,
+  onAddFilter,
+  onRemoveFilter,
+  onClearFilters,
   onAddRow,
   onAddColumn,
   canAddColumn,
@@ -52,7 +54,7 @@ function GridToolbar({
         </label>
         <div className="filter-anchor" ref={filterRef}>
           <button
-            className={filterActive ? "tool-button filter-active" : "tool-button"}
+            className={filters.length ? "tool-button filter-active" : "tool-button"}
             type="button"
             aria-expanded={filterOpen}
             onClick={onToggleFilter}
@@ -62,7 +64,7 @@ function GridToolbar({
           </button>
           {filterOpen ? (
             <div className="filter-pop" role="dialog" aria-label="Filter by column">
-              <select value={filterFieldId} aria-label="Filter column" onChange={(event) => onFilterField(event.target.value)}>
+              <select value={draftFieldId} aria-label="Filter column" onChange={(event) => onDraftField(event.target.value)}>
                 <option value="">Choose a column</option>
                 {fields.map((field) => (
                   <option key={field.id} value={field.id}>
@@ -72,13 +74,19 @@ function GridToolbar({
               </select>
               <input
                 type="text"
-                value={filterValue}
+                value={draftValue}
                 placeholder="Contains…"
                 aria-label="Filter value"
-                onChange={(event) => onFilterValue(event.target.value)}
+                onChange={(event) => onDraftValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onAddFilter();
+                  }
+                }}
               />
-              <button className="ghost-button" type="button" onClick={onClearFilter}>
-                Clear filter
+              <button className="primary-button" type="button" onClick={onAddFilter} disabled={!draftFieldId || !draftValue.trim()}>
+                Add filter
               </button>
             </div>
           ) : null}
@@ -112,6 +120,23 @@ function GridToolbar({
           </button>
         ) : null}
       </div>
+      {filters.length ? (
+        <div className="filter-chips">
+          {filters.map((filter) => {
+            const field = fields.find((entry) => String(entry.id) === String(filter.fieldId));
+            return (
+              <button key={filter.id} className="filter-chip" type="button" onClick={() => onRemoveFilter(filter.id)}>
+                <span>{field?.name || "Column"}: {filter.value}</span>
+                <X size={12} aria-hidden="true" />
+                <span className="sr-only">Remove filter</span>
+              </button>
+            );
+          })}
+          <button className="filter-chip is-clear" type="button" onClick={onClearFilters}>
+            Clear filters
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
