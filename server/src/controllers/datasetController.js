@@ -1,5 +1,6 @@
 const pool = require("../config/db");
 const { canonicalRole } = require("../middleware/auth");
+const { ensureSchema } = require("../database/ensure");
 
 let archiveColumnReady = null;
 
@@ -13,6 +14,56 @@ function ensureArchiveColumn() {
 }
 
 const FIELD_TYPES = new Set(["text", "number", "date", "boolean", "email"]);
+
+function isAdmin(user) {
+  return canonicalRole(user?.role) === "Admin";
+}
+
+async function listAccessibleFields(datasetId, user) {
+  await ensureSchema();
+  const admin = isAdmin(user);
+  const userId = Number(user?.id) || 0;
+  const result = await pool.query(
+    `
+    SELECT
+      f.id,
+      f.dataset_id,
+      f.name,
+      f.field_key,
+      f.field_type,
+      f.position,
+      f.is_required,
+      f.created_at,
+      CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_view, TRUE) END AS can_view,
+      CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_edit, TRUE) END AS can_edit
+    FROM fields f
+    LEFT JOIN field_permissions fp
+      ON fp.field_id = f.id
+     AND fp.user_id = $2
+    WHERE f.dataset_id = $1
+      AND f.is_deleted = FALSE
+      AND ($3::boolean OR COALESCE(fp.can_view, TRUE) = TRUE)
+    ORDER BY f.position ASC, f.id ASC
+    `,
+    [datasetId, userId, admin]
+  );
+  return result.rows;
+}
+
+async function assertCanEditField(client, user, fieldId) {
+  if (isAdmin(user)) return true;
+  const userId = Number(user?.id) || 0;
+  const result = await client.query(
+    `
+    SELECT COALESCE(can_view, TRUE) AS can_view, COALESCE(can_edit, TRUE) AS can_edit
+    FROM field_permissions
+    WHERE user_id = $1 AND field_id = $2
+    `,
+    [userId, fieldId]
+  );
+  if (!result.rows.length) return true;
+  return Boolean(result.rows[0].can_view) && Boolean(result.rows[0].can_edit);
+}
 
 function normalizeFieldKey(value) {
   return String(value || "")
@@ -161,28 +212,12 @@ const getDataset = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
-    const fieldsResult = await pool.query(
-      `
-      SELECT
-        id,
-        dataset_id,
-        name,
-        field_key,
-        field_type,
-        position,
-        is_required,
-        created_at
-      FROM fields
-      WHERE dataset_id = $1 AND is_deleted = FALSE
-      ORDER BY position ASC, id ASC
-      `,
-      [id]
-    );
+    const fields = await listAccessibleFields(id, req.user);
 
     res.json({
       dataset: {
         ...datasetResult.rows[0],
-        fields: fieldsResult.rows,
+        fields,
       },
     });
   } catch (error) {
@@ -232,14 +267,46 @@ const addField = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
-    const positionResult = await client.query(
-      `
-      SELECT COALESCE(MAX(position), -1) + 1 AS next_position
-      FROM fields
-      WHERE dataset_id = $1
-      `,
-      [datasetId]
-    );
+    await ensureSchema();
+
+    const anchorId = Number(req.body.anchor_field_id);
+    const placement = req.body.placement === "left" || req.body.placement === "right" ? req.body.placement : null;
+    let nextPosition;
+
+    if (placement && Number.isInteger(anchorId) && anchorId > 0) {
+      const anchor = await client.query(
+        `
+        SELECT position
+        FROM fields
+        WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
+        `,
+        [anchorId, datasetId]
+      );
+      if (!anchor.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Column not found" });
+      }
+      const anchorPosition = Number(anchor.rows[0].position) || 0;
+      nextPosition = placement === "left" ? anchorPosition : anchorPosition + 1;
+      await client.query(
+        `
+        UPDATE fields
+        SET position = position + 1
+        WHERE dataset_id = $1 AND position >= $2
+        `,
+        [datasetId, nextPosition]
+      );
+    } else {
+      const positionResult = await client.query(
+        `
+        SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+        FROM fields
+        WHERE dataset_id = $1
+        `,
+        [datasetId]
+      );
+      nextPosition = positionResult.rows[0].next_position;
+    }
 
     const insertResult = await client.query(
       `
@@ -247,14 +314,7 @@ const addField = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, dataset_id, name, field_key, field_type, position, is_required, created_at
       `,
-      [
-        datasetId,
-        name,
-        fieldKey,
-        fieldType,
-        positionResult.rows[0].next_position,
-        isRequired,
-      ]
+      [datasetId, name, fieldKey, fieldType, nextPosition, isRequired]
     );
 
     await client.query(
@@ -336,12 +396,16 @@ const getRecords = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
+    await ensureSchema();
+    const admin = isAdmin(req.user);
+    const userId = Number(req.user?.id) || 0;
+
     const recordsResult = await pool.query(
       `
-      SELECT id, created_at
+      SELECT id, position, created_at
       FROM records
       WHERE dataset_id = $1 AND is_deleted = FALSE
-      ORDER BY created_at ASC, id ASC
+      ORDER BY position ASC NULLS LAST, created_at ASC, id ASC
       `,
       [datasetId]
     );
@@ -356,8 +420,18 @@ const getRecords = async (req, res) => {
         AND r.is_deleted = FALSE
         AND f.dataset_id = $1
         AND f.is_deleted = FALSE
+        AND (
+          $2::boolean
+          OR NOT EXISTS (
+            SELECT 1
+            FROM field_permissions fp
+            WHERE fp.field_id = f.id
+              AND fp.user_id = $3
+              AND fp.can_view = FALSE
+          )
+        )
       `,
-      [datasetId]
+      [datasetId, admin, userId]
     );
 
     const valuesByRecord = new Map();
@@ -372,6 +446,7 @@ const getRecords = async (req, res) => {
     res.json({
       records: recordsResult.rows.map((record) => ({
         id: record.id,
+        position: record.position,
         created_at: record.created_at,
         values: valuesByRecord.get(record.id) || {},
       })),
@@ -386,6 +461,7 @@ const createRecord = async (req, res) => {
   const datasetId = Number(req.params.id);
   const createdBy = Number(req.user?.id);
   const rawValues = req.body?.values;
+  const allowBlank = req.body?.blank === true;
 
   if (!Number.isInteger(datasetId) || datasetId <= 0) {
     return res.status(400).json({ error: "Invalid dataset id" });
@@ -414,6 +490,8 @@ const createRecord = async (req, res) => {
       return res.status(404).json({ error: "Dataset not found" });
     }
 
+    await ensureSchema();
+
     const fieldsResult = await client.query(
       `
       SELECT id, name, field_key, field_type, is_required
@@ -429,6 +507,22 @@ const createRecord = async (req, res) => {
       return res.status(400).json({ error: "Add columns before creating rows" });
     }
 
+    if (!isAdmin(req.user)) {
+      const accessible = await listAccessibleFields(datasetId, req.user);
+      const accessByKey = new Map(accessible.map((field) => [field.field_key, field]));
+      for (const key of Object.keys(rawValues)) {
+        const field = fieldsResult.rows.find((entry) => entry.field_key === key);
+        if (!field) continue;
+        const access = accessByKey.get(key);
+        const raw = rawValues[key];
+        const filled = !(raw == null || raw === "" || raw === false);
+        if ((!access || !access.can_edit) && filled) {
+          await client.query("ROLLBACK");
+          return res.status(403).json({ error: "You do not have permission to edit this column" });
+        }
+      }
+    }
+
     const entries = [];
 
     for (const field of fieldsResult.rows) {
@@ -440,7 +534,7 @@ const createRecord = async (req, res) => {
         return res.status(400).json({ error: `${field.name} has an invalid value` });
       }
 
-      if (field.is_required && field.field_type !== "boolean" && normalized === "") {
+      if (!allowBlank && field.is_required && field.field_type !== "boolean" && normalized === "") {
         await client.query("ROLLBACK");
         return res.status(400).json({ error: `${field.name} is required` });
       }
@@ -454,13 +548,55 @@ const createRecord = async (req, res) => {
       }
     }
 
+    const insertRequest = req.body?.insert;
+    let position;
+    const anchorId = Number(insertRequest?.record_id);
+    const placement = insertRequest?.placement === "above" || insertRequest?.placement === "below"
+      ? insertRequest.placement
+      : null;
+
+    if (placement && Number.isInteger(anchorId) && anchorId > 0) {
+      const anchor = await client.query(
+        `
+        SELECT position
+        FROM records
+        WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
+        `,
+        [anchorId, datasetId]
+      );
+      if (!anchor.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Record not found" });
+      }
+      const anchorPosition = Number(anchor.rows[0].position) || 0;
+      position = placement === "above" ? anchorPosition : anchorPosition + 1;
+      await client.query(
+        `
+        UPDATE records
+        SET position = position + 1
+        WHERE dataset_id = $1 AND is_deleted = FALSE AND position >= $2
+        `,
+        [datasetId, position]
+      );
+    } else {
+      const maxResult = await client.query(
+        `
+        SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+        FROM records
+        WHERE dataset_id = $1
+        `,
+        [datasetId]
+      );
+      position = maxResult.rows[0].next_position;
+    }
+
     const insertRecord = await client.query(
       `
-      INSERT INTO records (dataset_id, created_by, updated_by)
-      VALUES ($1, $2, $2)
-      RETURNING id, created_at
+      INSERT INTO records (dataset_id, created_by, updated_by, position)
+      VALUES ($1, $2, $2, $3)
+      RETURNING id, position, created_at
       `,
-      [datasetId, createdBy]
+      [datasetId, createdBy, position]
     );
 
     const record = insertRecord.rows[0];
@@ -491,6 +627,7 @@ const createRecord = async (req, res) => {
     res.status(201).json({
       record: {
         id: record.id,
+        position: record.position,
         created_at: record.created_at,
         values,
       },
@@ -631,6 +768,7 @@ const updateCell = async (req, res) => {
     return res.status(401).json({ error: "Authentication required" });
   }
 
+  await ensureSchema();
   const client = await pool.connect();
 
   try {
@@ -665,6 +803,12 @@ const updateCell = async (req, res) => {
     }
 
     const field = fieldResult.rows[0];
+    const allowed = await assertCanEditField(client, req.user, fieldId);
+    if (!allowed) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "You do not have permission to edit this column" });
+    }
+
     const normalized = normalizeCellValue(field, req.body?.value);
 
     if (normalized == null) {
@@ -771,6 +915,90 @@ const updateCell = async (req, res) => {
   }
 };
 
+const deleteField = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const fieldId = Number(req.params.fieldId);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0 || !Number.isInteger(fieldId) || fieldId <= 0) {
+    return res.status(400).json({ error: "Invalid column id" });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE fields
+      SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND dataset_id = $2 AND is_deleted = FALSE
+      RETURNING id, name
+      `,
+      [fieldId, datasetId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Column not found" });
+    }
+
+    await pool.query(
+      `
+      UPDATE datasets
+      SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+      WHERE id = $1
+      `,
+      [datasetId, req.user?.id || null]
+    );
+
+    res.json({ success: true, field: result.rows[0] });
+  } catch (error) {
+    console.error("Delete field error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const getWorkspaceAuditLogs = async (req, res) => {
+  try {
+    await ensureSchema();
+    const admin = isAdmin(req.user);
+    const userId = Number(req.user?.id) || 0;
+    const result = await pool.query(
+      `
+      SELECT
+        a.id,
+        a.record_id,
+        d.id AS dataset_id,
+        d.name AS dataset_name,
+        f.name AS field_name,
+        u.name AS changed_by_name,
+        a.old_value,
+        a.new_value,
+        a.changed_at
+      FROM audit_logs a
+      JOIN records r ON r.id = a.record_id
+      JOIN datasets d ON d.id = r.dataset_id
+      JOIN users u ON u.id = a.changed_by
+      JOIN fields f ON f.id = a.field_id
+      WHERE d.is_deleted = FALSE
+        AND (
+          $1::boolean
+          OR NOT EXISTS (
+            SELECT 1
+            FROM field_permissions fp
+            WHERE fp.field_id = a.field_id
+              AND fp.user_id = $2
+              AND fp.can_view = FALSE
+          )
+        )
+      ORDER BY a.changed_at DESC
+      LIMIT 80
+      `,
+      [admin, userId]
+    );
+    res.json({ logs: result.rows });
+  } catch (error) {
+    console.error("Workspace audit error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 const updateDataset = async (req, res) => {
   const id = Number(req.params.id);
   const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
@@ -865,6 +1093,7 @@ module.exports = {
   createDataset,
   getDataset,
   addField,
+  deleteField,
   getRecords,
   createRecord,
   deleteRecord,
@@ -873,6 +1102,8 @@ module.exports = {
   updateCell,
   updateDataset,
   getAuditLogs,
+  getWorkspaceAuditLogs,
+  listAccessibleFields,
   normalizeFieldKey,
   normalizeCellValue,
 };

@@ -1,19 +1,7 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import {
-  Database,
-  Download,
-  FolderOpen,
-  LogOut,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Trash2,
-  Users,
-  X,
-} from "lucide-react";
+import { Download, FolderOpen, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import "./Dashboard.css";
 import { useToast } from "../components/toast-context";
 
@@ -98,15 +86,10 @@ function downloadName(datasetName) {
 function Dashboard() {
   const navigate = useNavigate();
   const { notify } = useToast();
-  const [sessionUser, setSessionUser] = useState(readUser);
-  const roleLabel = formatRole(sessionUser?.role);
-  const isAdmin = roleLabel === "Admin";
-  const roleClass =
-    roleLabel === "Admin"
-      ? "role-badge role-admin"
-      : roleLabel === "Managing Person"
-        ? "role-badge role-manager"
-        : "role-badge";
+  const sessionUser = readUser();
+  const isAdmin = formatRole(sessionUser?.role) === "Admin";
+  const [searchParams] = useSearchParams();
+  const datasetQuery = (searchParams.get("q") || "").trim().toLowerCase();
 
   const [datasets, setDatasets] = useState([]);
   const [stats, setStats] = useState({
@@ -127,11 +110,6 @@ function Dashboard() {
   const [deleting, setDeleting] = useState(false);
   const [restoringId, setRestoringId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState("");
-  const [roleSavingId, setRoleSavingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameName, setRenameName] = useState("");
@@ -178,20 +156,19 @@ function Dashboard() {
   }, [navigate, refreshKey, showArchived]);
 
   useEffect(() => {
-    const dialogOpen = modalOpen || adminOpen || deleteTarget || renameTarget;
+    const dialogOpen = modalOpen || deleteTarget || renameTarget;
     if (!dialogOpen) return undefined;
 
     function onKeyDown(event) {
       if (event.key !== "Escape" || submitting || deleting) return;
       setModalOpen(false);
-      setAdminOpen(false);
       setDeleteTarget(null);
       if (!renaming) setRenameTarget(null);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, adminOpen, deleteTarget, renameTarget, submitting, deleting, renaming]);
+  }, [modalOpen, deleteTarget, renameTarget, submitting, deleting, renaming]);
 
   useEffect(() => {
     if (menuId == null) return undefined;
@@ -205,11 +182,6 @@ function Dashboard() {
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [menuId]);
-
-  function handleLogout() {
-    localStorage.clear();
-    navigate("/login");
-  }
 
   function openModal() {
     setName("");
@@ -359,86 +331,14 @@ function Dashboard() {
     }
   }
 
-  async function openAdminPanel() {
-    setAdminOpen(true);
-    setUsersLoading(true);
-    setUsersError("");
-
-    try {
-      const { data } = await axios.get(`${API_BASE}/api/users`, authConfig());
-      setUsers(data.users || []);
-    } catch (err) {
-      if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
-        return;
-      }
-      setUsersError(errorMessage(err, "Unable to load users."));
-    } finally {
-      setUsersLoading(false);
-    }
-  }
-
-  async function changeRole(person, role) {
-    setRoleSavingId(person.id);
-    setUsersError("");
-
-    try {
-      const { data } = await axios.patch(
-        `${API_BASE}/api/users/${person.id}/role`,
-        { role },
-        authConfig()
-      );
-      const updated = data.user;
-      setUsers((current) =>
-        current.map((entry) => (entry.id === person.id ? { ...entry, ...updated } : entry))
-      );
-
-      if (sessionUser && Number(sessionUser.id) === Number(person.id)) {
-        const nextUser = { ...sessionUser, role: updated.role };
-        localStorage.setItem("user", JSON.stringify(nextUser));
-        setSessionUser(nextUser);
-      }
-    } catch (err) {
-      if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
-        return;
-      }
-      setUsersError(errorMessage(err, "Unable to update this role."));
-    } finally {
-      setRoleSavingId(null);
-    }
-  }
+  const visibleDatasets = datasets.filter((dataset) => {
+    if (!datasetQuery) return true;
+    const haystack = `${dataset.name || ""} ${dataset.description || ""}`.toLowerCase();
+    return haystack.includes(datasetQuery);
+  });
 
   return (
     <div className="dashboard">
-      <header className="dashboard-header">
-        <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">
-            <Database size={18} strokeWidth={1.75} />
-          </span>
-          <span>QTech Data Management</span>
-        </div>
-
-        <div className="header-user">
-          <div className="user-meta">
-            <strong>{sessionUser?.name || "Signed in"}</strong>
-            <span className={roleClass}>{roleLabel}</span>
-          </div>
-          {isAdmin ? (
-            <button className="logout-button" type="button" onClick={openAdminPanel}>
-              <Users size={16} strokeWidth={2} aria-hidden="true" />
-              Admin Panel
-            </button>
-          ) : null}
-          <button className="logout-button" type="button" onClick={handleLogout}>
-            <LogOut size={16} strokeWidth={2} aria-hidden="true" />
-            Logout
-          </button>
-        </div>
-      </header>
-
       <main className="dashboard-main">
         <section className="dataset-card">
           <div className="dataset-card-head">
@@ -492,20 +392,22 @@ function Dashboard() {
 
           {loading ? <p className="page-message">Loading datasets…</p> : null}
 
-          {!loading && !error && datasets.length === 0 ? (
+          {!loading && !error && visibleDatasets.length === 0 ? (
             <div className="dataset-placeholder">
               <FolderOpen size={28} strokeWidth={1.5} aria-hidden="true" />
               <p>
-                {showArchived
-                  ? "No archived datasets."
-                  : "No datasets yet. Create one to get started."}
+                {datasetQuery
+                  ? "No datasets match that search."
+                  : showArchived
+                    ? "No archived datasets."
+                    : "No datasets yet. Create one to get started."}
               </p>
             </div>
           ) : null}
 
-          {!loading && datasets.length > 0 ? (
+          {!loading && visibleDatasets.length > 0 ? (
             <div className="file-grid">
-              {datasets.map((dataset) => {
+              {visibleDatasets.map((dataset) => {
                 const author = dataset.last_modified_by || dataset.created_by_name || "";
                 const menuOpen = menuId === dataset.id;
                 return (
@@ -787,76 +689,6 @@ function Dashboard() {
                 {deleting ? "Archiving…" : "Delete"}
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {adminOpen ? (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            if (!roleSavingId) setAdminOpen(false);
-          }}
-        >
-          <div
-            className="modal admin-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="admin-panel-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-heading">
-              <h2 id="admin-panel-title">Admin Panel</h2>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="Close"
-                onClick={() => setAdminOpen(false)}
-                disabled={Boolean(roleSavingId)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p className="confirm-copy">Registered users and their roles.</p>
-            {usersError ? (
-              <p className="page-error" role="alert">
-                {usersError}
-              </p>
-            ) : null}
-            {usersLoading ? <p className="page-message">Loading users…</p> : null}
-            {!usersLoading && users.length > 0 ? (
-              <div className="dataset-table-wrap admin-table-wrap">
-                <table className="dataset-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map((person) => (
-                      <tr key={person.id}>
-                        <td>{person.name}</td>
-                        <td>{person.email}</td>
-                        <td>
-                          <select
-                            className="role-select"
-                            value={formatRole(person.role)}
-                            disabled={roleSavingId === person.id}
-                            aria-label={`Role for ${person.name}`}
-                            onChange={(event) => changeRole(person, event.target.value)}
-                          >
-                            <option value="Admin">Admin</option>
-                            <option value="Managing Person">Managing Person</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
           </div>
         </div>
       ) : null}

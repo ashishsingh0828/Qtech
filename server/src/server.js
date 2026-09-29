@@ -3,6 +3,9 @@ const cors = require("cors");
 require("dotenv").config();
 
 const pool = require("./config/db");
+const { ensureSchema } = require("./database/ensure");
+const { requireAuth } = require("./middleware/auth");
+const { getWorkspaceAuditLogs } = require("./controllers/datasetController");
 const authRoutes = require("./routes/authRoutes");
 const datasetRoutes = require("./routes/datasetRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -16,12 +19,11 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/datasets", datasetRoutes);
 app.use("/api/users", userRoutes);
+app.get("/api/audit-logs", requireAuth, getWorkspaceAuditLogs);
 
-pool
-  .query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
-  .catch((error) => {
-    console.error("Schema ensure error:", error);
-  });
+ensureSchema().catch((error) => {
+  console.error("Schema ensure error:", error);
+});
 
 app.get("/", (req, res) => {
   res.json({

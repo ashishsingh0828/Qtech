@@ -94,6 +94,7 @@ CREATE TABLE records (
     created_by INTEGER REFERENCES users(id),
     updated_by INTEGER REFERENCES users(id),
     is_deleted BOOLEAN DEFAULT FALSE,
+    position INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -128,7 +129,19 @@ CREATE TABLE audit_logs (
 );
 
 -- ============================================
--- 10. UPLOADED FILES
+-- 10. FIELD PERMISSIONS
+-- ============================================
+
+CREATE TABLE field_permissions (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    field_id INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+    can_view BOOLEAN NOT NULL DEFAULT TRUE,
+    can_edit BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, field_id)
+);
+
+-- ============================================
+-- 11. UPLOADED FILES
 -- ============================================
 
 CREATE TABLE uploaded_files (
@@ -178,3 +191,9 @@ ON audit_logs(field_id);
 
 CREATE INDEX idx_uploaded_files_dataset_id
 ON uploaded_files(dataset_id);
+
+CREATE INDEX idx_field_permissions_field_id
+ON field_permissions(field_id);
+
+CREATE INDEX idx_records_dataset_position
+ON records(dataset_id, position);

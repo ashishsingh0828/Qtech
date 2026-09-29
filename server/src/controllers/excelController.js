@@ -1,7 +1,8 @@
 const pool = require("../config/db");
 const XLSX = require("xlsx");
 const { canonicalRole } = require("../middleware/auth");
-const { normalizeFieldKey, normalizeCellValue } = require("./datasetController");
+const { normalizeFieldKey, normalizeCellValue, listAccessibleFields } = require("./datasetController");
+const { ensureSchema } = require("../database/ensure");
 
 function cellToString(value) {
   if (value == null || value === "") return "";
@@ -19,7 +20,7 @@ function readSheet(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
-    return { headers: [], rows: [] };
+    return { headers: [], rows: [], sheetName: "" };
   }
 
   const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
@@ -46,7 +47,7 @@ function readSheet(buffer) {
     .map((row) => headers.map((_, index) => cellToString(row[index])))
     .filter((row) => row.some((cell) => cell !== ""));
 
-  return { headers, rows };
+  return { headers, rows, sheetName };
 }
 
 function matchHeader(header, fields) {
@@ -117,8 +118,9 @@ const previewExcel = async (req, res) => {
   try {
     const loaded = await loadDatasetFields(datasetId);
     if (!loaded) return res.status(404).json({ error: "Dataset not found" });
+    loaded.fields = await listAccessibleFields(datasetId, req.user);
 
-    const { headers, rows } = readSheet(req.file.buffer);
+    const { headers, rows, sheetName } = readSheet(req.file.buffer);
     if (!headers.length) {
       return res.status(400).json({ error: "The spreadsheet has no header row" });
     }
@@ -155,6 +157,7 @@ const previewExcel = async (req, res) => {
       preview,
       matchedFields,
       unmatchedHeaders,
+      sheetName: sheetName || "Sheet1",
     });
   } catch (error) {
     console.error("Preview excel error:", error);
@@ -176,6 +179,8 @@ const importExcel = async (req, res) => {
     return res.status(401).json({ error: "Authentication required" });
   }
   if (!req.file) return res.status(400).json({ error: "An Excel file is required" });
+
+  await ensureSchema();
 
   let headers = [];
   let rows = [];
@@ -216,7 +221,14 @@ const importExcel = async (req, res) => {
       [datasetId]
     );
 
-    const fields = fieldsResult.rows;
+    let fields = fieldsResult.rows;
+    if (canonicalRole(req.user?.role) !== "Admin") {
+      const accessible = await listAccessibleFields(datasetId, req.user);
+      const editableIds = new Set(
+        accessible.filter((field) => field.can_edit).map((field) => Number(field.id))
+      );
+      fields = fields.filter((field) => editableIds.has(Number(field.id)));
+    }
     const usedKeys = new Set(fields.map((field) => field.field_key));
     let nextPosition =
       fields.reduce((max, field) => Math.max(max, Number(field.position) || 0), -1) + 1;
@@ -254,6 +266,15 @@ const importExcel = async (req, res) => {
     }
 
     let importedCount = 0;
+    const maxPosition = await client.query(
+      `
+      SELECT COALESCE(MAX(position), -1) AS max_position
+      FROM records
+      WHERE dataset_id = $1
+      `,
+      [datasetId]
+    );
+    let nextRowPosition = Number(maxPosition.rows[0].max_position) + 1;
 
     for (const row of rows) {
       const cells = [];
@@ -269,12 +290,13 @@ const importExcel = async (req, res) => {
 
       const insertedRecord = await client.query(
         `
-        INSERT INTO records (dataset_id, created_by, updated_by)
-        VALUES ($1, $2, $2)
+        INSERT INTO records (dataset_id, created_by, updated_by, position)
+        VALUES ($1, $2, $2, $3)
         RETURNING id
         `,
-        [datasetId, createdBy]
+        [datasetId, createdBy, nextRowPosition]
       );
+      nextRowPosition += 1;
       const recordId = insertedRecord.rows[0].id;
       const placeholders = [];
       const params = [];
@@ -326,13 +348,14 @@ const exportExcel = async (req, res) => {
   try {
     const loaded = await loadDatasetFields(datasetId);
     if (!loaded) return res.status(404).json({ error: "Dataset not found" });
+    loaded.fields = await listAccessibleFields(datasetId, req.user);
 
     const recordsResult = await pool.query(
       `
       SELECT id
       FROM records
       WHERE dataset_id = $1 AND is_deleted = FALSE
-      ORDER BY created_at ASC, id ASC
+      ORDER BY position ASC NULLS LAST, created_at ASC, id ASC
       `,
       [datasetId]
     );
