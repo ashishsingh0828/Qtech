@@ -8,6 +8,10 @@ const ROLE_PERMISSIONS = {
     canManageUsers: true,
     canEditSchema: true,
     canVerify: true,
+    canValidate: true,
+    canManageAmc: true,
+    canResetAmc: true,
+    canClearValidation: true,
   },
   manager: {
     editableGroupKeys: "all",
@@ -18,6 +22,10 @@ const ROLE_PERMISSIONS = {
     canManageUsers: false,
     canEditSchema: false,
     canVerify: true,
+    canValidate: true,
+    canManageAmc: true,
+    canResetAmc: true,
+    canClearValidation: true,
   },
   validator: {
     editableGroupKeys: ["data_validation"],
@@ -28,6 +36,10 @@ const ROLE_PERMISSIONS = {
     canManageUsers: false,
     canEditSchema: false,
     canVerify: false,
+    canValidate: true,
+    canManageAmc: false,
+    canResetAmc: false,
+    canClearValidation: false,
   },
   service: {
     editableGroupKeys: ["amc", "schedule_services", "breakdown_calls", "follow_up", "complaint"],
@@ -38,10 +50,23 @@ const ROLE_PERMISSIONS = {
     canManageUsers: false,
     canEditSchema: false,
     canVerify: false,
+    canValidate: false,
+    canManageAmc: true,
+    canResetAmc: false,
+    canClearValidation: false,
   },
 };
 
-const serverManagedSemantics = [];
+const serverManagedSemantics = [
+  "validated_by",
+  "validated_at",
+  "verified",
+  "verified_by",
+  "verified_at",
+  "amc_status",
+  "ack_at",
+  "warranty_live",
+];
 
 function normalizeRole(role) {
   const normalized = String(role || "")

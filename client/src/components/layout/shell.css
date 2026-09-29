@@ -2,23 +2,22 @@
   display: flex;
   height: 100svh;
   overflow: hidden;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--canvas);
+  color: var(--ink);
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 248px;
+  width: 232px;
   flex: none;
-  background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
-  border-right: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 8px 0 24px rgba(9, 13, 22, 0.12);
-  transition: width 0.18s ease;
+  background: var(--navy);
+  border-right: 1px solid var(--navy-2);
+  transition: width 160ms var(--ease);
 }
 
 .sidebar.is-collapsed {
-  width: 76px;
+  width: 64px;
 }
 
 .sidebar-brand {
@@ -51,8 +50,8 @@
   place-items: center;
   flex: none;
   border-radius: 10px;
-  background: #4f46e5;
-  color: #eef2ff;
+  background: var(--navy-2);
+  color: var(--gold);
 }
 
 .side-nav {
@@ -83,9 +82,9 @@
 }
 
 .side-link.is-active {
-  background: rgba(99, 102, 241, 0.18);
-  border-left-color: #818cf8;
-  color: #eef2ff;
+  background: rgba(255, 255, 255, 0.06);
+  border-left-color: var(--gold);
+  color: #faf9f7;
 }
 
 .sidebar-foot {
@@ -139,11 +138,11 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  min-height: 64px;
-  padding: 0 20px;
-  background: #ffffff;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  height: 56px;
+  min-height: 56px;
+  padding: 0 32px;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .topbar-title {
@@ -161,9 +160,10 @@
 
 .topbar-title h1 {
   margin: 0;
-  color: #0f172a;
-  font-size: 16px;
-  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
   letter-spacing: -0.02em;
 }
 
@@ -451,8 +451,9 @@
   height: 34px;
   place-items: center;
   border-radius: 999px;
-  background: #312e81;
-  color: #eef2ff;
+  background: var(--navy);
+  color: #faf9f7;
+  box-shadow: 0 0 0 1px var(--gold);
   font-size: 12px;
   font-weight: 700;
 }
@@ -480,13 +481,15 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding: 32px;
 }
 
 .shell-content.is-bleed {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #ffffff;
+  padding: 32px;
+  background: var(--canvas);
 }
 
 .page-frame {

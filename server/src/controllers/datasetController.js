@@ -1,6 +1,7 @@
 const pool = require("../config/db");
 const { hasPermission } = require("../../../shared/permissions");
 const { roleCanEditField, notifiesLeadership } = require("../constants/access");
+const { logActivity } = require("../sheet/activityLog");
 const { notifyLeadership } = require("./notificationController");
 const { ensureSchema } = require("../database/ensure");
 const { ensureMasterFields, MASTER_FIELDS } = require("../constants/masterFields");
@@ -920,6 +921,17 @@ const updateCell = async (req, res) => {
       `,
       [changedBy, recordId]
     );
+
+    await logActivity(client, {
+      datasetId,
+      rowId: recordId,
+      actorId: changedBy,
+      actorName: req.user?.name || "User",
+      action: "cell_edit",
+      columnKey: field.field_key,
+      fromValue: previous,
+      toValue: normalized,
+    });
 
     if (notifiesLeadership(req.user, field)) {
       const datasetName = await client.query("SELECT name FROM datasets WHERE id = $1", [datasetId]);

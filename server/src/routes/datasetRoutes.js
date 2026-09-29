@@ -27,6 +27,7 @@ const {
   renameColumn,
   exportSheet,
 } = require("../controllers/sheetController");
+const { getSummary, getRowActivity, validateRow, verifyRow, updateAmc } = require("../controllers/rowActionController");
 const { validateRecord, verifyRecord, updateProposal } = require("../controllers/workflowController");
 
 const router = express.Router();
@@ -92,7 +93,12 @@ router.post("/:id/preview-excel", requirePermission("canUpload"), excelUpload, p
 router.post("/:id/import-excel", requirePermission("canUpload"), excelUpload, importExcel);
 router.get("/:id/export-excel", exportExcel);
 router.get("/:id/export", exportSheet);
+router.get("/:id/summary", getSummary);
 router.get("/:id/rows", getRows);
+router.get("/:id/rows/:rowId/activity", getRowActivity);
+router.post("/:id/rows/:rowId/validate", requirePermission("canValidate"), validateRow);
+router.post("/:id/rows/:rowId/verify", requirePermission("canVerify"), verifyRow);
+router.post("/:id/rows/:rowId/amc", requirePermission("canManageAmc"), updateAmc);
 router.post("/:id/rows", requirePermission("canAddRow"), createSheetRow);
 router.patch("/:id/rows/:rowId", patchSheetRow);
 router.delete("/:id/rows/:rowId", requirePermission("canDeleteRow"), deleteSheetRow);

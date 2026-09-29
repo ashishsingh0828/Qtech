@@ -7,13 +7,22 @@ const { buildWorkbook } = require("../excel/exportWorkbook");
 const {
   cleanLabel,
   columnWidth,
-  emptySchema,
-  groupKeyFor,
-  headerType,
   prettifyFileName,
   semanticFor,
   strictValue,
 } = require("../excel/sheetSchema");
+const { logActivity } = require("../sheet/activityLog");
+const { readySchema } = require("../sheet/prepareSheet");
+const { resolveSchema } = require("../sheet/resolveSchema");
+const { applyRekeys, ensureSystemColumns } = require("../sheet/systemColumns");
+const {
+  TABS,
+  appTimeZone,
+  matchesQuery,
+  matchesTab,
+  overlayData,
+  todayISO,
+} = require("../sheet/rowRules");
 
 const INSERT_BATCH = 1000;
 
@@ -56,70 +65,6 @@ async function loadDataset(datasetId) {
   return result.rows[0] || null;
 }
 
-function mapFieldType(field) {
-  const hinted = headerType(field.name);
-  if (hinted) return hinted;
-  if (field.field_type === "number") return "decimal";
-  if (field.field_type === "date") return "date";
-  if (field.field_type === "boolean") return "yesno";
-  if (field.field_type === "email") return "email";
-  return "text";
-}
-
-async function legacySchema(datasetId) {
-  const fields = await pool.query(
-    `
-    SELECT name, field_key, field_type, position
-    FROM fields
-    WHERE dataset_id = $1 AND is_deleted = FALSE
-    ORDER BY position ASC, id ASC
-    `,
-    [datasetId]
-  );
-  if (!fields.rows.length) return emptySchema();
-  const columns = fields.rows.map((field, order) => {
-    const label = cleanLabel(field.name) || field.field_key;
-    const type = mapFieldType(field);
-    const column = {
-      key: field.field_key,
-      label,
-      originalLabel: label,
-      autoNamed: false,
-      groupId: "g0",
-      order,
-      type,
-      width: columnWidth(type, label),
-      hidden: false,
-    };
-    const semantic = semanticFor(label);
-    if (semantic) column.semantic = semantic;
-    return column;
-  });
-  return {
-    groups: [
-      {
-        id: "g0",
-        label: "General",
-        groupKey: groupKeyFor("General"),
-        order: 0,
-        startIndex: 0,
-        span: columns.length,
-        tint: "general",
-      },
-    ],
-    columns,
-  };
-}
-
-function storedSchema(dataset) {
-  if (dataset.schema && Array.isArray(dataset.schema.columns)) return dataset.schema;
-  return null;
-}
-
-async function resolveSchema(dataset) {
-  return storedSchema(dataset) || legacySchema(dataset.id);
-}
-
 function presentDataset(dataset, schema) {
   return {
     id: dataset.id,
@@ -128,6 +73,7 @@ function presentDataset(dataset, schema) {
     rowCount: Number.isInteger(dataset.row_count) ? dataset.row_count : undefined,
     columnCount: schema.columns.length,
     schema,
+    timezone: appTimeZone(),
     createdAt: dataset.created_at,
     updatedAt: dataset.updated_at,
     uploadedBy: dataset.created_by,
@@ -172,6 +118,9 @@ const importSheet = async (req, res) => {
   try {
     await ensureSchema();
     const parsed = parseWorkbook(req.file.buffer);
+    const prepared = ensureSystemColumns(parsed.schema);
+    const schema = prepared.schema;
+    const importedRows = parsed.rows.map((data) => applyRekeys(data, prepared.rekeys));
     const name = prettifyFileName(original);
     const client = await pool.connect();
     try {
@@ -185,15 +134,15 @@ const importSheet = async (req, res) => {
         [
           name,
           original.slice(0, 255),
-          parsed.rows.length,
-          parsed.schema.columns.length,
-          JSON.stringify(parsed.schema),
+          importedRows.length,
+          schema.columns.length,
+          JSON.stringify(schema),
           userId,
         ]
       );
       const dataset = inserted.rows[0];
-      for (let offset = 0; offset < parsed.rows.length; offset += INSERT_BATCH) {
-        const chunk = parsed.rows.slice(offset, offset + INSERT_BATCH).map((data, index) => ({
+      for (let offset = 0; offset < importedRows.length; offset += INSERT_BATCH) {
+        const chunk = importedRows.slice(offset, offset + INSERT_BATCH).map((data, index) => ({
           position: offset + index,
           data,
         }));
@@ -208,10 +157,10 @@ const importSheet = async (req, res) => {
       }
       await client.query("COMMIT");
       res.status(201).json({
-        dataset: presentDataset(dataset, parsed.schema),
-        rows: parsed.rows.length,
-        columns: parsed.schema.columns.length,
-        groups: parsed.schema.groups.length,
+        dataset: presentDataset(dataset, schema),
+        rows: importedRows.length,
+        columns: schema.columns.length,
+        groups: schema.groups.length,
         autoNamed: parsed.autoNamed,
       });
     } catch (error) {
@@ -234,7 +183,7 @@ const getSheet = async (req, res) => {
     await ensureSchema();
     const dataset = await loadDataset(Number(req.params.id));
     if (!dataset) return res.status(404).json({ error: "Dataset not found" });
-    const schema = await resolveSchema(dataset);
+    const schema = await readySchema(dataset, resolveSchema);
     const presented = presentDataset(dataset, schema);
     if (presented.rowCount == null) {
       const count = await pool.query(
@@ -255,6 +204,8 @@ const getRows = async (req, res) => {
     await ensureSchema();
     const dataset = await loadDataset(Number(req.params.id));
     if (!dataset) return res.status(404).json({ error: "Dataset not found" });
+    const schema = await readySchema(dataset, resolveSchema);
+    const today = todayISO();
     const result = await pool.query(
       `
       SELECT id, position, data
@@ -281,11 +232,18 @@ const getRows = async (req, res) => {
       );
       legacyById = new Map(packed.rows.map((row) => [row.id, row.data || {}]));
     }
-    const rows = result.rows.map((row, index) => ({
-      id: row.id,
-      position: row.position == null ? index : row.position,
-      data: row.data || legacyById.get(row.id) || {},
-    }));
+    const tab = String(req.query.tab || "all");
+    const query = String(req.query.q || "").trim().toLowerCase().slice(0, 200);
+    if (!TABS.includes(tab)) return res.status(400).json({ error: "Unknown sheet tab." });
+    const rows = result.rows
+      .map((row, index) => ({
+        id: row.id,
+        position: row.position == null ? index : row.position,
+        data: row.data || legacyById.get(row.id) || {},
+      }))
+      .filter((row) => matchesTab(row.data, schema, tab, today))
+      .filter((row) => matchesQuery(overlayData(row.data, schema, today), query))
+      .map((row) => ({ ...row, data: overlayData(row.data, schema, today) }));
     sendJson(req, res, 200, { rows });
   } catch (error) {
     console.error("Get rows error:", error);
@@ -303,6 +261,8 @@ const createSheetRow = async (req, res) => {
       "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM records WHERE dataset_id = $1 AND is_deleted = FALSE",
       [dataset.id]
     );
+    const schema = await readySchema(dataset, resolveSchema);
+    const today = todayISO();
     const position = positionResult.rows[0]?.position || 0;
     const inserted = await pool.query(
       `
@@ -322,7 +282,8 @@ const createSheetRow = async (req, res) => {
       `,
       [dataset.id, userId]
     );
-    res.status(201).json({ row: inserted.rows[0] });
+    const created = inserted.rows[0];
+    res.status(201).json({ row: { ...created, data: overlayData(created.data || {}, schema, today) } });
   } catch (error) {
     console.error("Create row error:", error);
     res.status(500).json({ error: "Unable to add a row." });
@@ -339,7 +300,8 @@ const patchSheetRow = async (req, res) => {
     await ensureSchema();
     const dataset = await loadDataset(Number(req.params.id));
     if (!dataset) return res.status(404).json({ error: "Dataset not found" });
-    const schema = await resolveSchema(dataset);
+    const schema = await readySchema(dataset, resolveSchema);
+    const today = todayISO();
     const rowResult = await pool.query(
       `
       SELECT id, position, data
@@ -363,28 +325,59 @@ const patchSheetRow = async (req, res) => {
     }
     const data = await readRowData(rowResult.rows[0]);
     const normalized = {};
+    const changes = [];
     for (const [key, raw] of Object.entries(values)) {
       const column = schema.columns.find((entry) => entry.key === key);
       if (!column) throw fail(400, "That column is not on this sheet.");
       const next = strictValue(column, raw);
+      const previous = data[key] == null ? "" : String(data[key]);
       normalized[key] = next;
+      if (previous !== String(next ?? "")) {
+        changes.push({ key, fromValue: previous, toValue: next });
+      }
       if (next === "") delete data[key];
       else data[key] = next;
     }
-    const updated = await pool.query(
-      `
-      UPDATE records
-      SET data = $1::jsonb, updated_by = $2, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-      RETURNING id, position, data
-      `,
-      [JSON.stringify(data), userId, rowResult.rows[0].id]
-    );
-    await pool.query("UPDATE datasets SET updated_at = CURRENT_TIMESTAMP, updated_by = $2 WHERE id = $1", [
-      dataset.id,
-      userId,
-    ]);
-    res.json({ row: updated.rows[0], values: normalized });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `
+        UPDATE records
+        SET data = $1::jsonb, updated_by = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING id, position, data
+        `,
+        [JSON.stringify(data), userId, rowResult.rows[0].id]
+      );
+      for (const change of changes) {
+        await logActivity(client, {
+          datasetId: dataset.id,
+          rowId: rowResult.rows[0].id,
+          actorId: userId,
+          actorName: req.user?.name || "User",
+          action: "cell_edit",
+          columnKey: change.key,
+          fromValue: change.fromValue,
+          toValue: change.toValue,
+        });
+      }
+      await client.query("UPDATE datasets SET updated_at = CURRENT_TIMESTAMP, updated_by = $2 WHERE id = $1", [
+        dataset.id,
+        userId,
+      ]);
+      await client.query("COMMIT");
+      const saved = updated.rows[0];
+      res.json({
+        row: { ...saved, data: overlayData(saved.data, schema, today) },
+        values: normalized,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     const status = error.status || 500;
     console.error("Patch row error:", error);
@@ -433,9 +426,16 @@ const renameColumn = async (req, res) => {
     await ensureSchema();
     const dataset = await loadDataset(Number(req.params.id));
     if (!dataset) return res.status(404).json({ error: "Dataset not found" });
-    const schema = await resolveSchema(dataset);
+    const schema = await readySchema(dataset, resolveSchema);
     const column = schema.columns.find((entry) => entry.key === req.params.key);
     if (!column) return res.status(404).json({ error: "Column not found" });
+    if (column.system) {
+      return res.status(403).json({
+        error: "System columns cannot be renamed",
+        code: "FORBIDDEN",
+        requiredPermission: "canEditSchema",
+      });
+    }
     column.label = label.slice(0, 255);
     column.autoNamed = false;
     column.width = columnWidth(column.type, column.label);
@@ -463,7 +463,8 @@ const exportSheet = async (req, res) => {
     await ensureSchema();
     const dataset = await loadDataset(Number(req.params.id));
     if (!dataset) return res.status(404).json({ error: "Dataset not found" });
-    const schema = await resolveSchema(dataset);
+    const schema = await readySchema(dataset, resolveSchema);
+    const today = todayISO();
     const result = await pool.query(
       `
       SELECT r.id, r.position, r.data,
@@ -479,7 +480,9 @@ const exportSheet = async (req, res) => {
       `,
       [dataset.id]
     );
-    const rows = result.rows.map((row) => ({ data: row.data || row.legacy_data || {} }));
+    const rows = result.rows.map((row) => ({
+      data: overlayData(row.data || row.legacy_data || {}, schema, today),
+    }));
     const buffer = buildWorkbook(schema, rows);
     const fileName = `${prettifyFileName(dataset.name)}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

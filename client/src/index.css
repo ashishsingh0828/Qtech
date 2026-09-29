@@ -1,9 +1,35 @@
 :root {
-  font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+  --canvas: #faf9f7;
+  --surface: #ffffff;
+  --surface-2: #f4f2ee;
+  --hairline: #e8e4dd;
+  --hairline-strong: #d9d3c9;
+  --ink: #14171f;
+  --ink-2: #4a4f5c;
+  --muted: #7b7f8b;
+  --navy: #0e1726;
+  --navy-2: #172236;
+  --gold: #b8955a;
+  --gold-soft: #f3ebdd;
+  --emerald: #1f6f4f;
+  --emerald-bg: #e6f2ec;
+  --amber: #96620f;
+  --amber-bg: #fbf0da;
+  --ruby: #a63a38;
+  --ruby-bg: #f8e6e5;
+  --sapphire: #2a5698;
+  --sapphire-bg: #e6edf8;
+  --stone: #5c616d;
+  --stone-bg: #eeedea;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --float: 0 1px 2px rgba(20, 23, 31, 0.04), 0 8px 24px rgba(20, 23, 31, 0.08);
+  --serif: "Instrument Serif", Georgia, serif;
+  --sans: "Inter", ui-sans-serif, sans-serif;
+  font-family: var(--sans);
   line-height: 1.45;
-  font-weight: 450;
-  color: #0f172a;
-  background: #f8fafc;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -24,6 +50,17 @@ body {
   margin: 0;
   min-height: 100%;
   overflow: hidden;
+  font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 #root {

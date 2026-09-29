@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, MoreHorizontal, Trash2 } from "lucide-react";
 import { useToast } from "../toast-context";
-import { formatCell, orderedColumns, pinnedCount, rawCell } from "../../lib/sheetFormat";
+import { formatCell, orderedColumns, pinnedCount, rawCell, statusTone } from "../../lib/sheetFormat";
 import "./SheetGrid.css";
 
 const ROW_H = 36;
-const HEAD_H = 72;
-const GUTTER = 56;
+const BANNER_H = 32;
+const SUB_H = 36;
+const HEAD_H = BANNER_H + SUB_H;
+const GUTTER = 72;
 const OVERSCAN = 8;
 
 function SheetGrid({
@@ -14,18 +16,27 @@ function SheetGrid({
   rows,
   loading,
   error,
+  emptyLabel,
+  timeZone,
   onRetry,
   onPatch,
   onRename,
   onAddRow,
   onDeleteRow,
+  onOpenRow,
+  onValidate,
+  onVerify,
   canDelete,
   canAddRow,
   canRename,
+  canValidate,
+  canVerify,
+  canClearValidation,
   editableKeys,
   denialMessage,
   adding,
   autoNamed,
+  acting,
 }) {
   const { notify } = useToast();
   const editable = new Set(editableKeys || []);
@@ -38,6 +49,10 @@ function SheetGrid({
   const [cellError, setCellError] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [flash, setFlash] = useState(null);
+  const [popover, setPopover] = useState(null);
+  const [menu, setMenu] = useState(null);
 
   const columns = useMemo(() => orderedColumns(schema), [schema]);
   const pinCount = pinnedCount(columns);
@@ -70,7 +85,18 @@ function SheetGrid({
       observer.disconnect();
       node.removeEventListener("scroll", update);
     };
-  }, [columns.length, rows.length]);
+  }, [columns.length, rows.length, loading]);
+
+  useEffect(() => {
+    if (!popover && !menu) return undefined;
+    function close(event) {
+      if (event.target.closest?.(".float-layer, .sheet-row-menu, .sheet-cell")) return;
+      setPopover(null);
+      setMenu(null);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [popover, menu]);
 
   const firstRow = Math.max(0, Math.floor((viewport.top - HEAD_H) / ROW_H) - OVERSCAN);
   const lastRow = Math.min(rows.length, Math.ceil((viewport.top + viewport.height - HEAD_H) / ROW_H) + OVERSCAN);
@@ -86,11 +112,26 @@ function SheetGrid({
     return end > viewport.left && start < viewport.left + viewport.width + 240;
   }
 
+  function openPopover(kind, row, event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu(null);
+    setPopover({ kind, row, top: rect.bottom + 6, left: Math.min(rect.left, window.innerWidth - 220) });
+  }
+
   function beginEdit(row, column) {
+    if (column.semantic === "validated") {
+      if (!canValidate) notify(denialMessage || "You cannot edit that column.");
+      return;
+    }
+    if (column.semantic === "verified" || column.computed) {
+      if (!(column.semantic === "verified" && canVerify)) notify(denialMessage || "You cannot edit that column.");
+      return;
+    }
     if (!editable.has(column.key)) {
       notify(denialMessage || "You cannot edit that column.");
       return;
     }
+    setPopover(null);
     setCellError("");
     setRenaming(null);
     setEditing({ rowId: row.id, key: column.key });
@@ -106,6 +147,8 @@ function SheetGrid({
     setCellError("");
     try {
       await onPatch(row, column.key, draft);
+      setFlash({ rowId: row.id, key: column.key });
+      window.setTimeout(() => setFlash(null), 700);
     } catch (err) {
       setCellError(err?.message || "Unable to save this cell.");
       setEditing({ rowId: row.id, key: column.key });
@@ -115,7 +158,7 @@ function SheetGrid({
   }
 
   function beginRename(column) {
-    if (!canRename) return;
+    if (!canRename || column.system) return;
     setEditing(null);
     setRenaming(column.key);
     setRenameDraft(column.label);
@@ -136,7 +179,15 @@ function SheetGrid({
     }
   }
 
-  if (loading) return <div className="sheet-state">Loading sheet…</div>;
+  if (loading) {
+    return (
+      <div className="sheet-state" aria-busy="true">
+        <span className="skeleton-bar" />
+        <span className="skeleton-bar" />
+        <span className="skeleton-bar" />
+      </div>
+    );
+  }
   if (error) {
     return (
       <div className="sheet-state is-error">
@@ -159,23 +210,20 @@ function SheetGrid({
       <div className="sheet-scroll" ref={scrollerRef}>
         <div className="sheet-canvas" style={{ width: totalWidth, height: HEAD_H + Math.max(rows.length, 1) * ROW_H }}>
           <div className="sheet-head" style={{ width: totalWidth }}>
-            <div className="sheet-line">
+            <div className="sheet-line is-banner">
               <div className="sheet-gutter is-sticky" style={{ left: 0, zIndex: 8 }} />
               {groups.map((group) => {
                 const end = group.startIndex + group.span;
                 const width = (widths[end] || totalWidth) - widths[group.startIndex];
                 const sticks = (widths[end] || 0) > pinWidth;
+                const locked = columns.every((column) => column.groupId !== group.id || !editable.has(column.key));
                 return (
-                  <div
-                    key={group.id}
-                    className={`sheet-banner tint-${group.tint || "general"}`}
-                    style={{ width }}
-                  >
+                  <div key={group.id} className={`sheet-banner tint-${group.tint || "general"}`} style={{ width }}>
                     <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }}>
                       {group.label}
-                      {columns.every((column) => column.groupId !== group.id || !editable.has(column.key)) ? (
+                      {locked ? (
                         <span className="sheet-lock" title={denialMessage || "Read only"}>
-                          <Lock size={12} aria-label="Read only" />
+                          <Lock size={12} strokeWidth={1.5} aria-label="Read only" />
                         </span>
                       ) : null}
                     </span>
@@ -209,34 +257,58 @@ function SheetGrid({
             </div>
           </div>
           <div className="sheet-body" style={{ height: Math.max(rows.length, 1) * ROW_H }}>
-            {rows.length === 0 ? <div className="sheet-state in-body">No rows yet.</div> : null}
+            {rows.length === 0 ? <div className="sheet-state in-body">{emptyLabel || "No rows yet."}</div> : null}
             {visibleRows.map(({ index, row }) => (
               <div key={row.id} className="sheet-row" style={{ top: index * ROW_H, width: totalWidth, height: ROW_H }}>
                 <div className="sheet-gutter is-sticky" style={{ left: 0, zIndex: 3 }}>
-                  <span>{index + 1}</span>
+                  <button
+                    type="button"
+                    className="sheet-row-menu"
+                    aria-label={`Actions for row ${index + 1}`}
+                    onClick={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      setPopover(null);
+                      setMenu({ row, top: rect.bottom + 4, left: rect.left });
+                    }}
+                  >
+                    <MoreHorizontal size={16} strokeWidth={1.5} />
+                  </button>
+                  <span onDoubleClick={() => onOpenRow(row)}>{index + 1}</span>
                   {canDelete ? (
                     <button type="button" className="sheet-row-delete" aria-label={`Delete row ${index + 1}`} onClick={() => onDeleteRow(row)}>
-                      ×
+                      <Trash2 size={14} strokeWidth={1.5} />
                     </button>
                   ) : null}
                 </div>
                 {columns.map((column, columnIndex) => {
                   if (!columnVisible(columnIndex)) return <div key={column.key} style={{ width: column.width || 160, flex: "none" }} />;
                   const active = editing?.rowId === row.id && editing?.key === column.key;
-                  const shown = formatCell(column, row.data?.[column.key]);
+                  const value = row.data?.[column.key];
+                  const shown = formatCell(column, value, timeZone);
+                  const tone = statusTone(value);
                   const pinned = columnIndex < pinCount;
+                  const isSelected = selected?.rowId === row.id && selected?.key === column.key;
+                  const isFlash = flash?.rowId === row.id && flash?.key === column.key;
                   return (
                     <div
                       key={column.key}
                       className={[
                         "sheet-cell",
                         pinned ? "is-sticky" : "",
+                        pinned && columnIndex === pinCount - 1 ? "is-pin-edge" : "",
                         editable.has(column.key) ? "" : "is-readonly",
+                        isSelected ? "is-selected" : "",
+                        isFlash ? "is-saved" : "",
                       ].filter(Boolean).join(" ")}
                       style={{
                         width: column.width || 160,
                         left: pinned ? widths[columnIndex] : undefined,
                         zIndex: pinned ? 2 : 1,
+                      }}
+                      onClick={(event) => {
+                        setSelected({ rowId: row.id, key: column.key });
+                        if (column.semantic === "validated" && canValidate) openPopover("validate", row, event);
+                        else if (column.semantic === "verified" && canVerify) openPopover("verify", row, event);
                       }}
                       onDoubleClick={() => beginEdit(row, column)}
                     >
@@ -247,21 +319,23 @@ function SheetGrid({
                           aria-label={column.label}
                           autoFocus
                           onChange={(event) => setDraft(event.target.value)}
-                            onBlur={(event) => {
-                              if (event.currentTarget.dataset.cancel === "1") return;
-                              void commitEdit(row, column);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                event.currentTarget.blur();
-                              } else if (event.key === "Escape") {
-                                event.currentTarget.dataset.cancel = "1";
-                                setEditing(null);
-                                event.currentTarget.blur();
-                              }
-                            }}
+                          onBlur={(event) => {
+                            if (event.currentTarget.dataset.cancel === "1") return;
+                            void commitEdit(row, column);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            } else if (event.key === "Escape") {
+                              event.currentTarget.dataset.cancel = "1";
+                              setEditing(null);
+                              event.currentTarget.blur();
+                            }
+                          }}
                         />
+                      ) : tone ? (
+                        <span className={`status-pill tone-${tone}`}>{shown}</span>
                       ) : (
                         <span className={shown ? "sheet-value" : "sheet-empty"} title={shown}>{shown || ""}</span>
                       )}
@@ -279,10 +353,33 @@ function SheetGrid({
             {adding ? "Adding row…" : "Add row"}
           </button>
         ) : null}
-        <span>{rows.length} rows</span>
-        <span>{columns.length} columns</span>
-        <span>{groups.length} groups</span>
+        <span className="tabular">{rows.length} rows</span>
+        <span className="tabular">{columns.length} columns</span>
+        <span className="tabular">{groups.length} groups</span>
       </div>
+      {popover ? (
+        <div className="float-layer cell-popover" style={{ top: popover.top, left: popover.left }} role="dialog">
+          {popover.kind === "validate" ? (
+            <>
+              <button type="button" disabled={acting} onClick={() => { setPopover(null); onValidate(popover.row, "Yes"); }}>Yes</button>
+              <button type="button" disabled={acting} onClick={() => { setPopover(null); onValidate(popover.row, "No"); }}>No</button>
+              {canClearValidation ? (
+                <button type="button" disabled={acting} onClick={() => { setPopover(null); onValidate(popover.row, ""); }}>Clear</button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <button type="button" disabled={acting} onClick={() => { setPopover(null); onVerify(popover.row, true); }}>Verified OK</button>
+              <button type="button" disabled={acting} onClick={() => { setPopover(null); onVerify(popover.row, false); }}>Pending</button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {menu ? (
+        <div className="float-layer cell-popover" style={{ top: menu.top, left: menu.left }} role="menu">
+          <button type="button" onClick={() => { setMenu(null); onOpenRow(menu.row); }}>Open record</button>
+        </div>
+      ) : null}
     </div>
   );
 }

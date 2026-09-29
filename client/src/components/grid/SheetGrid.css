@@ -22,14 +22,18 @@
   position: sticky;
   top: 0;
   z-index: 4;
-  height: 72px;
-  background: #ffffff;
-  box-shadow: 0 1px 0 rgba(226, 232, 240, 0.9);
+  height: 68px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .sheet-line {
   display: flex;
   height: 36px;
+}
+
+.sheet-line.is-banner {
+  height: 32px;
 }
 
 .is-sticky {
@@ -40,14 +44,25 @@
 .sheet-banner {
   display: flex;
   align-items: center;
-  height: 36px;
+  height: 32px;
   padding: 0 8px;
   overflow: hidden;
+  color: var(--ink-2);
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+.tint-customer_detail { background: #f1eee8; }
+.tint-instrument_details { background: #e9efea; }
+.tint-data_validation { background: #e8edf3; }
+.tint-schedule_services { background: #f3ece3; }
+.tint-complaint { background: #efe9ef; }
+.tint-breakdown_calls { background: #e6efee; }
+.tint-amc { background: #f1ebe6; }
+.tint-follow_up { background: #ecebf3; }
+.tint-general { background: var(--surface-2); }
 
 .sheet-banner-label {
   position: sticky;
@@ -72,10 +87,10 @@
 .sheet-header-label {
   width: 100%;
   border: 0;
-  color: #0f172a;
+  color: var(--ink-2);
   font: inherit;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.2;
   text-align: left;
   white-space: normal;
@@ -112,9 +127,28 @@
 }
 
 .sheet-cell.is-readonly {
-  color: #94a3b8;
+  color: var(--muted);
   cursor: default;
   user-select: text;
+}
+
+.sheet-cell.is-selected {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
+.sheet-cell.is-saved {
+  animation: cell-saved 700ms var(--ease);
+}
+
+.sheet-cell.is-pin-edge,
+.sheet-subhead.is-pin-edge {
+  box-shadow: 8px 0 12px rgba(20, 23, 31, 0.06);
+}
+
+@keyframes cell-saved {
+  from { background: var(--gold-soft); }
+  to { background: transparent; }
 }
 
 .sheet-lock {
@@ -243,15 +277,6 @@
   font-weight: 650;
 }
 
-.tint-customer_detail { background: #f8fafc; color: #334155; }
-.tint-instrument_details { background: #eef2ff; color: #3730a3; }
-.tint-data_validation { background: #fffbeb; color: #92400e; }
-.tint-schedule_services { background: #f5f3ff; color: #6d28d9; }
-.tint-complaint { background: #fff1f2; color: #be123c; }
-.tint-breakdown_calls { background: #fff7ed; color: #c2410c; }
-.tint-amc { background: #eff6ff; color: #1d4ed8; }
-.tint-follow_up { background: #ecfdf5; color: #047857; }
-.tint-general { background: #f1f5f9; color: #334155; }
 
 .excel-drop {
   margin: 0 28px 8px;

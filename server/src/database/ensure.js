@@ -61,6 +61,21 @@ async function applySchema() {
     )
   `);
   await pool.query("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, is_read, created_at DESC)");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id SERIAL PRIMARY KEY,
+      dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+      row_id INTEGER NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_name VARCHAR(150) NOT NULL,
+      action VARCHAR(80) NOT NULL,
+      column_key VARCHAR(120),
+      from_value TEXT,
+      to_value TEXT,
+      at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_activity_log_row ON activity_log(dataset_id, row_id, at DESC)");
   await canonicalizeRoles();
 }
 

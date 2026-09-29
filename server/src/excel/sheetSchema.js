@@ -46,6 +46,18 @@ function uniqueKey(label, used) {
 
 function semanticFor(label) {
   const name = normalizedLabel(label);
+  if (name === "validated at") return "validated_at";
+  if (name === "rejection reason") return "rejection_reason";
+  if (name === "verified by") return "verified_by";
+  if (name === "verified at") return "verified_at";
+  if (name === "verified") return "verified";
+  if (name === "warranty") return "warranty_live";
+  if (name === "amc status") return "amc_status";
+  if (name === "proposal sent at" || name === "proposal sent") return "proposal_sent_at";
+  if (name === "acknowledgement note" || name === "acknowledgment note") return "ack_note";
+  if (name === "acknowledged at") return "ack_at";
+  if (name === "acknowledgement" || name === "acknowledgment") return "ack_response";
+  if (name === "next follow up" || name === "next follow-up") return "next_follow_up";
   if (name === "customer name") return "customer_name";
   if (name === "start date") return "start_date";
   if (name === "end date") return "end_date";
@@ -155,7 +167,7 @@ function inferType(samples) {
 
 function columnWidth(type, label) {
   const fromLabel = Math.min(280, Math.max(112, cleanLabel(label).length * 8 + 28));
-  if (type === "date") return Math.max(132, fromLabel);
+  if (type === "date" || type === "datetime") return Math.max(168, fromLabel);
   if (type === "integer" || type === "decimal") return Math.max(96, Math.min(fromLabel, 140));
   if (type === "phone") return Math.max(140, fromLabel);
   return fromLabel;
@@ -266,6 +278,7 @@ function emptySchema() {
 
 module.exports = {
   cleanLabel,
+  normalizedLabel,
   groupKeyFor,
   uniqueKey,
   semanticFor,

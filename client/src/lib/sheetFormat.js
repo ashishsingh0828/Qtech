@@ -1,7 +1,54 @@
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function formatCell(column, value) {
+const STATUS_TONE = {
+  Yes: "emerald",
+  Active: "emerald",
+  "Verified OK": "emerald",
+  Acknowledged: "emerald",
+  "Expiring in 30 days": "amber",
+  Pending: "amber",
+  "AMC Due": "amber",
+  "Proposal Sent": "sapphire",
+  No: "ruby",
+  Expired: "ruby",
+  Declined: "ruby",
+  Unknown: "stone",
+  "Not Due": "stone",
+};
+
+export function statusTone(value) {
+  return STATUS_TONE[String(value || "")] || "";
+}
+
+export function todayISO(timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timeZone || "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const bag = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${bag.year}-${bag.month}-${bag.day}`;
+}
+
+export function formatStamp(value, timeZone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value == null ? "" : String(value);
+  const formatted = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timeZone || "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+  return formatted.replace(/\b(am|pm)\b/gi, (token) => token.toUpperCase());
+}
+
+export function formatCell(column, value, timeZone) {
   if (value == null || value === "") return "";
+  if (column?.type === "datetime") return formatStamp(value, timeZone);
   if (column?.type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
     const [year, month, day] = String(value).split("-").map(Number);
     const label = MONTHS[month - 1];
