@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Database, Download, FolderOpen, LogOut, Plus, RotateCcw, Trash2, Users, X } from "lucide-react";
 import "./Dashboard.css";
+import { useToast } from "../components/toast-context";
 
 const API_BASE = "http://localhost:5000";
 
@@ -72,6 +73,7 @@ function downloadName(datasetName) {
 
 function Dashboard() {
   const navigate = useNavigate();
+  const { notify } = useToast();
   const [sessionUser, setSessionUser] = useState(readUser);
   const roleLabel = formatRole(sessionUser?.role);
   const isAdmin = roleLabel === "Admin";
@@ -214,6 +216,7 @@ function Dashboard() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      notify("Export ready");
     } catch (err) {
       if (err.response?.status === 401) {
         localStorage.clear();

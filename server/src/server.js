@@ -41,9 +41,25 @@ app.get("/api/test-db", async (req, res) => {
     console.error("Database connection error:", error);
 
     res.status(500).json({
-      message: "Database connection failed",
+      error: error.message,
     });
   }
+});
+
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  const status = Number(err.status || err.statusCode) || 500;
+  const code = status >= 400 && status < 600 ? status : 500;
+  res.status(code).json({ error: err.message || "Internal server error" });
 });
 
 const PORT = process.env.PORT || 5000;

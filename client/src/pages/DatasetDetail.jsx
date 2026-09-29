@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import "./Dashboard.css";
 import "./DatasetDetail.css";
+import { useToast } from "../components/toast-context";
 
 const API_BASE = "http://localhost:5000";
 const FIELD_TYPES = ["text", "number", "date", "boolean", "email"];
@@ -143,6 +144,7 @@ function draftsMatch(field, value, draft) {
 }
 
 function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthorized }) {
+  const { notify } = useToast();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState("");
@@ -198,6 +200,7 @@ function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthoriz
       onSaved(recordId, field.field_key, data.updated?.value ?? nextValue);
       setStatus("saved");
       setStatusText("Saved");
+      notify("Cell saved");
       window.setTimeout(() => {
         setStatus((current) => (current === "saved" ? "" : current));
       }, 1200);
@@ -273,6 +276,7 @@ function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthoriz
 
 function DatasetDetail() {
   const navigate = useNavigate();
+  const { notify } = useToast();
   const { id } = useParams();
   const user = readUser();
   const roleLabel = formatRole(user?.role);
@@ -454,6 +458,7 @@ function DatasetDetail() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      notify("Export ready");
     } catch (err) {
       if (err.response?.status === 401) {
         leaveForLogin();
@@ -478,6 +483,7 @@ function DatasetDetail() {
       await axios.post(`${API_BASE}/api/datasets/${id}/import-excel`, form, authConfig());
       setImportOpen(false);
       setRefreshKey((value) => value + 1);
+      notify("File uploaded");
     } catch (err) {
       if (err.response?.status === 401) {
         leaveForLogin();
@@ -628,6 +634,7 @@ function DatasetDetail() {
       setRowModalOpen(false);
       setRowValues({});
       await reloadRecords();
+      notify("Row added");
     } catch (err) {
       if (err.response?.status === 401) {
         localStorage.clear();

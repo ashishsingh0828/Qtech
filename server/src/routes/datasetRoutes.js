@@ -22,6 +22,16 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
+function rejectInvalidInteger(paramName, label) {
+  return (req, res, next, value) => {
+    if (!/^\d+$/.test(String(value))) {
+      return res.status(400).json({ error: `Invalid ${label}` });
+    }
+    req.params[paramName] = String(Number(value));
+    return next();
+  };
+}
+
 function excelUpload(req, res, next) {
   upload.single("file")(req, res, (error) => {
     if (!error) return next();
@@ -32,6 +42,8 @@ function excelUpload(req, res, next) {
   });
 }
 
+router.param("id", rejectInvalidInteger("id", "id"));
+router.param("recordId", rejectInvalidInteger("recordId", "record id"));
 router.use(requireAuth);
 router.get("/", getDatasets);
 router.post("/", createDataset);
