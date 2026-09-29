@@ -12,16 +12,20 @@ const {
   strictValue,
 } = require("../excel/sheetSchema");
 const { logActivity } = require("../sheet/activityLog");
+const { notifySheetEvent, shouldNotifyEdit } = require("./notificationController");
 const { readySchema } = require("../sheet/prepareSheet");
 const { resolveSchema } = require("../sheet/resolveSchema");
 const { applyRekeys, ensureSystemColumns } = require("../sheet/systemColumns");
 const {
   TABS,
   appTimeZone,
+  groupKeyForColumn,
   matchesQuery,
   matchesTab,
   overlayData,
+  readSemantic,
   todayISO,
+  writeDays,
 } = require("../sheet/rowRules");
 
 const INSERT_BATCH = 1000;
@@ -333,11 +337,17 @@ const patchSheetRow = async (req, res) => {
       const previous = data[key] == null ? "" : String(data[key]);
       normalized[key] = next;
       if (previous !== String(next ?? "")) {
-        changes.push({ key, fromValue: previous, toValue: next });
+        changes.push({
+          key,
+          fromValue: previous,
+          toValue: next,
+          groupKey: groupKeyForColumn(schema, column),
+        });
       }
       if (next === "") delete data[key];
       else data[key] = next;
     }
+    writeDays(data, schema);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -368,6 +378,20 @@ const patchSheetRow = async (req, res) => {
       ]);
       await client.query("COMMIT");
       const saved = updated.rows[0];
+      if (shouldNotifyEdit(req.user?.role, schema, changes)) {
+        const touched = changes.find((change) => ["amc", "schedule_services", "follow_up"].includes(change.groupKey));
+        const group = (schema.groups || []).find((entry) => entry.groupKey === touched?.groupKey);
+        const customer = readSemantic(saved.data, schema, "customer_name") || "a customer";
+        notifySheetEvent({
+          actorId: userId,
+          actorName: req.user?.name || "Service",
+          datasetId: dataset.id,
+          rowId: saved.id,
+          customerName: customer,
+          type: "service_edit",
+          summary: `${req.user?.name || "Service"} updated ${group?.label || "a group"} on ${customer}`,
+        }).catch((error) => console.error("Notification error:", error));
+      }
       res.json({
         row: { ...saved, data: overlayData(saved.data, schema, today) },
         values: normalized,

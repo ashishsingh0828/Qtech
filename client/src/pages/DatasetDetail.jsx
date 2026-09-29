@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import SheetGrid from "../components/grid/SheetGrid";
 import RowDrawer from "../components/sheet/RowDrawer";
@@ -7,6 +7,7 @@ import ValidationModal from "../components/sheet/ValidationModal";
 import { useToast } from "../components/toast-context";
 import { useAuth } from "../auth/AuthProvider";
 import { editDenialMessage, getEditableColumnKeys } from "@shared/permissions.js";
+import { publishSheet } from "../lib/sheetBridge";
 import {
   API_BASE,
   authConfig,
@@ -23,6 +24,9 @@ const TABS = [
   ["validation_overdue", "Validation Overdue"],
   ["pending_verification", "Pending Verification"],
   ["amc_due", "AMC Due"],
+  ["proposal_sent", "Proposal Sent"],
+  ["active_amcs", "Active AMCs"],
+  ["follow_up_due", "Follow-ups Due"],
 ];
 
 function DatasetDetail() {
@@ -31,13 +35,24 @@ function DatasetDetail() {
   const { session } = useAuth();
   const permissions = session?.permissions || {};
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab") || "";
+  const rowParam = searchParams.get("row") || "";
+  const userId = session?.user?.id || "0";
+  const pmsKey = `qtech-pms:${userId}:${id}`;
+  const queryKey = `${id}|${requestedTab}|${rowParam}`;
   const [dataset, setDataset] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState(() => (TABS.some(([value]) => value === requestedTab) ? requestedTab : "all"));
+  const [appliedQuery, setAppliedQuery] = useState(queryKey);
+  const [pmsKeySeen, setPmsKeySeen] = useState(pmsKey);
+  const [pmsOpen, setPmsOpen] = useState(() => window.localStorage.getItem(pmsKey) !== "0");
+  const [focusRowId, setFocusRowId] = useState(rowParam);
+  const [openedKey, setOpenedKey] = useState("");
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [counts, setCounts] = useState(null);
@@ -55,6 +70,25 @@ function DatasetDetail() {
     setLoading(true);
     setError("");
   }
+  if (appliedQuery !== queryKey) {
+    const [prevId, , previousRow] = appliedQuery.split("|");
+    setAppliedQuery(queryKey);
+    setFocusRowId(rowParam);
+    if (id !== prevId || rowParam !== (previousRow || "")) {
+      if (rowParam) setTab("all");
+      else if (TABS.some(([value]) => value === requestedTab)) setTab(requestedTab);
+      else setTab("all");
+    }
+  }
+  if (pmsKeySeen !== pmsKey) {
+    setPmsKeySeen(pmsKey);
+    setPmsOpen(window.localStorage.getItem(pmsKey) !== "0");
+  }
+
+  useEffect(() => {
+    publishSheet(id, dataset?.schema?.groups || []);
+    return () => publishSheet("", []);
+  }, [id, dataset]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -114,6 +148,30 @@ function DatasetDetail() {
       ignore = true;
     };
   }, [id, revision]);
+
+  const focusMatch = rowParam ? rows.find((row) => String(row.id) === String(rowParam)) : null;
+  const openKey = focusMatch ? `${id}|${rowParam}` : "";
+  if (openKey && openedKey !== openKey) {
+    setOpenedKey(openKey);
+    setDrawerRow(focusMatch);
+    setFocusRowId(rowParam);
+  }
+
+  function selectTab(value) {
+    setTab(value);
+    const next = new URLSearchParams(searchParams);
+    if (value === "all") next.delete("tab");
+    else next.set("tab", value);
+    setSearchParams(next, { replace: true });
+  }
+
+  function togglePms() {
+    setPmsOpen((current) => {
+      const next = !current;
+      window.localStorage.setItem(pmsKey, next ? "1" : "0");
+      return next;
+    });
+  }
 
   function replaceRow(next) {
     setRows((current) => current.map((entry) => (entry.id === next.id ? next : entry)));
@@ -297,7 +355,7 @@ function DatasetDetail() {
               type="button"
               role="tab"
               aria-selected={tab === value}
-              onClick={() => setTab(value)}
+              onClick={() => selectTab(value)}
             >
               {label}
               {summaryLoading ? <span className="count-pill">…</span> : <span className="count-pill">{counts?.[value] ?? 0}</span>}
@@ -335,6 +393,9 @@ function DatasetDetail() {
         adding={adding}
         autoNamed={autoNamed}
         acting={acting}
+        pmsOpen={pmsOpen}
+        onTogglePms={togglePms}
+        focusRowId={focusRowId}
       />
       {drawerRow ? (
         <RowDrawer

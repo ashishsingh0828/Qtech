@@ -1,7 +1,8 @@
 const pool = require("../config/db");
-const { hasPermission } = require("../../../shared/permissions");
+const { hasPermission, normalizeRole } = require("../../../shared/permissions");
 const { ensureSchema } = require("../database/ensure");
 const { logActivity, presentActivity } = require("../sheet/activityLog");
+const { notifySheetEvent } = require("./notificationController");
 const { readySchema } = require("../sheet/prepareSheet");
 const { resolveSchema } = require("../sheet/resolveSchema");
 const {
@@ -186,6 +187,19 @@ const validateRow = async (req, res) => {
         toValue: clearing ? "" : result,
       });
       await client.query("COMMIT");
+      if ((result === "Yes" || result === "No") && normalizeRole(req.user?.role) === "validator") {
+        const customer = readSemantic(saved.data, schema, "customer_name") || "a customer";
+        const detail = result === "No" ? `No (${String(req.body?.reason || "").trim()})` : "Yes";
+        notifySheetEvent({
+          actorId: person.id,
+          actorName: person.name,
+          datasetId: dataset.id,
+          rowId: saved.id,
+          customerName: customer,
+          type: "validation",
+          summary: `${person.name} marked validation ${detail} on ${customer}`,
+        }).catch((error) => console.error("Notification error:", error));
+      }
       res.json({
         row: {
           id: saved.id,

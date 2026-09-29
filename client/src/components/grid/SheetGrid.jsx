@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Lock, MoreHorizontal, Trash2 } from "lucide-react";
+import { ChevronRight, Lock, MoreHorizontal, Trash2 } from "lucide-react";
 import { useToast } from "../toast-context";
-import { formatCell, orderedColumns, pinnedCount, rawCell, statusTone } from "../../lib/sheetFormat";
+import { dueTone, formatCell, orderedColumns, pinnedCount, rawCell, statusTone } from "../../lib/sheetFormat";
 import "./SheetGrid.css";
 
 const ROW_H = 36;
@@ -37,6 +37,9 @@ function SheetGrid({
   adding,
   autoNamed,
   acting,
+  pmsOpen,
+  onTogglePms,
+  focusRowId,
 }) {
   const { notify } = useToast();
   const editable = new Set(editableKeys || []);
@@ -54,9 +57,21 @@ function SheetGrid({
   const [popover, setPopover] = useState(null);
   const [menu, setMenu] = useState(null);
 
-  const columns = useMemo(() => orderedColumns(schema), [schema]);
+  const columns = useMemo(() => {
+    const ordered = orderedColumns(schema);
+    if (pmsOpen !== false) return ordered;
+    return ordered.filter((column) => !/^pms:\d+$/.test(column.semantic || "") && !/^pm_date:\d+$/.test(column.semantic || ""));
+  }, [schema, pmsOpen]);
   const pinCount = pinnedCount(columns);
-  const groups = schema?.groups || [];
+  const groups = useMemo(() => {
+    let cursor = 0;
+    return (schema?.groups || []).map((group) => {
+      const span = columns.filter((column) => column.groupId === group.id).length;
+      const next = { ...group, startIndex: cursor, span };
+      cursor += span;
+      return next;
+    }).filter((group) => group.span > 0);
+  }, [schema, columns]);
   const widths = useMemo(() => {
     const prefix = [GUTTER];
     columns.forEach((column) => {
@@ -97,6 +112,13 @@ function SheetGrid({
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [popover, menu]);
+
+  useEffect(() => {
+    if (!focusRowId || !scrollerRef.current) return;
+    const index = rows.findIndex((row) => String(row.id) === String(focusRowId));
+    if (index < 0) return;
+    scrollerRef.current.scrollTo({ top: Math.max(0, HEAD_H + index * ROW_H - 48), behavior: "smooth" });
+  }, [focusRowId, rows]);
 
   const firstRow = Math.max(0, Math.floor((viewport.top - HEAD_H) / ROW_H) - OVERSCAN);
   const lastRow = Math.min(rows.length, Math.ceil((viewport.top + viewport.height - HEAD_H) / ROW_H) + OVERSCAN);
@@ -219,7 +241,18 @@ function SheetGrid({
                 const locked = columns.every((column) => column.groupId !== group.id || !editable.has(column.key));
                 return (
                   <div key={group.id} className={`sheet-banner tint-${group.tint || "general"}`} style={{ width }}>
-                    <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }}>
+                    <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }} data-group-key={group.groupKey}>
+                      {group.groupKey === "schedule_services" ? (
+                        <button
+                          className={pmsOpen === false ? "pms-toggle" : "pms-toggle is-open"}
+                          type="button"
+                          aria-expanded={pmsOpen !== false}
+                          aria-label={pmsOpen === false ? "Expand PMS columns" : "Collapse PMS columns"}
+                          onClick={onTogglePms}
+                        >
+                          <ChevronRight size={14} strokeWidth={1.5} />
+                        </button>
+                      ) : null}
                       {group.label}
                       {locked ? (
                         <span className="sheet-lock" title={denialMessage || "Read only"}>
@@ -259,7 +292,7 @@ function SheetGrid({
           <div className="sheet-body" style={{ height: Math.max(rows.length, 1) * ROW_H }}>
             {rows.length === 0 ? <div className="sheet-state in-body">{emptyLabel || "No rows yet."}</div> : null}
             {visibleRows.map(({ index, row }) => (
-              <div key={row.id} className="sheet-row" style={{ top: index * ROW_H, width: totalWidth, height: ROW_H }}>
+              <div key={row.id} className={String(focusRowId) === String(row.id) ? "sheet-row is-focus" : "sheet-row"} style={{ top: index * ROW_H, width: totalWidth, height: ROW_H }}>
                 <div className="sheet-gutter is-sticky" style={{ left: 0, zIndex: 3 }}>
                   <button
                     type="button"
@@ -334,6 +367,10 @@ function SheetGrid({
                             }
                           }}
                         />
+                      ) : column.semantic === "next_due_pms" ? (
+                        <span className={`status-pill tone-${dueTone(value, timeZone)}`}>{shown || "—"}</span>
+                      ) : column.semantic === "days" && Number(value) < 0 ? (
+                        <span className="status-pill tone-ruby">{shown}</span>
                       ) : tone ? (
                         <span className={`status-pill tone-${tone}`}>{shown}</span>
                       ) : (

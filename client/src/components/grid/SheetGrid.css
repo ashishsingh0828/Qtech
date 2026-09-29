@@ -67,7 +67,8 @@
 .sheet-banner-label {
   position: sticky;
   left: var(--pin-width);
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -124,6 +125,31 @@
   position: absolute;
   left: 0;
   display: flex;
+}
+
+.sheet-row.is-focus .sheet-cell {
+  animation: row-flash 900ms var(--ease);
+}
+
+.pms-toggle {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: transform 160ms var(--ease);
+}
+
+.pms-toggle.is-open {
+  transform: rotate(90deg);
+}
+
+@keyframes row-flash {
+  from { background: var(--gold-soft); }
 }
 
 .sheet-cell.is-readonly {
@@ -279,18 +305,17 @@
 
 
 .excel-drop {
-  margin: 0 28px 8px;
+  margin: 0;
   padding: 28px 20px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 18px;
-  background: #ffffff;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 12px;
+  background: var(--surface);
   text-align: center;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .excel-drop.is-over {
-  border-color: #4f46e5;
-  background: #eef2ff;
+  border-color: var(--navy);
+  background: var(--gold-soft);
 }
 
 .excel-drop h2 {
@@ -324,7 +349,7 @@
 .excel-progress span {
   display: block;
   height: 100%;
-  background: #4f46e5;
+  background: var(--navy);
 }
 
 .excel-drop-error {

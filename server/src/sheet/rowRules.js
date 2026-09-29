@@ -1,4 +1,13 @@
-const TABS = ["all", "needs_validation", "validation_overdue", "pending_verification", "amc_due"];
+const TABS = [
+  "all",
+  "needs_validation",
+  "validation_overdue",
+  "pending_verification",
+  "amc_due",
+  "proposal_sent",
+  "active_amcs",
+  "follow_up_due",
+];
 
 function appTimeZone() {
   return process.env.APP_TIMEZONE || "Asia/Kolkata";
@@ -68,12 +77,60 @@ function effectiveAmc(data, schema, today) {
   return warrantyExpired(end, today) ? "AMC Due" : "Not Due";
 }
 
+function wholeDays(start, end) {
+  const [startYear, startMonth, startDay] = start.split("-").map(Number);
+  const [endYear, endMonth, endDay] = end.split("-").map(Number);
+  const span = Date.UTC(endYear, endMonth - 1, endDay) - Date.UTC(startYear, startMonth - 1, startDay);
+  return Math.round(span / 86400000);
+}
+
+function writeDays(data, schema) {
+  const column = columnBySemantic(schema, "days");
+  if (!column || !data) return data;
+  const start = dateOnly(readSemantic(data, schema, "start_date"));
+  const end = dateOnly(readSemantic(data, schema, "end_date"));
+  if (!start || !end) delete data[column.key];
+  else data[column.key] = wholeDays(start, end);
+  return data;
+}
+
+function nextDuePms(data, schema) {
+  const scheduled = (schema?.columns || []).filter((column) => /^pms:\d+$/.test(column.semantic || ""));
+  let earliest = "";
+  let anyScheduled = false;
+  let anyOpen = false;
+  scheduled.forEach((column) => {
+    const raw = String(data?.[column.key] ?? "").trim().toLowerCase();
+    if (!raw || raw === "na" || raw === "n/a" || raw === "-") return;
+    const iso = dateOnly(data[column.key]);
+    if (!iso) return;
+    anyScheduled = true;
+    const index = column.semantic.slice(4);
+    const doneColumn = (schema.columns || []).find((entry) => entry.semantic === `pm_date:${index}`);
+    const done = String(doneColumn ? data?.[doneColumn.key] ?? "" : "").trim().toLowerCase();
+    const fulfilled = done && done !== "na" && done !== "n/a" && done !== "-";
+    if (fulfilled) return;
+    anyOpen = true;
+    if (!earliest || iso < earliest) earliest = iso;
+  });
+  if (!anyScheduled) return "";
+  if (!anyOpen) return "Complete";
+  return earliest;
+}
+
+function groupKeyForColumn(schema, column) {
+  return (schema?.groups || []).find((group) => group.id === column?.groupId)?.groupKey || "";
+}
+
 function overlayData(data, schema, today) {
   const view = { ...(data || {}) };
+  writeDays(view, schema);
   const warranty = columnBySemantic(schema, "warranty_live");
   const amc = columnBySemantic(schema, "amc_status");
+  const nextDue = columnBySemantic(schema, "next_due_pms");
   if (warranty) view[warranty.key] = warrantyLive(readSemantic(data, schema, "end_date"), today);
   if (amc) view[amc.key] = effectiveAmc(data, schema, today);
+  if (nextDue) view[nextDue.key] = nextDuePms(data, schema);
   return view;
 }
 
@@ -87,6 +144,12 @@ function matchesTab(data, schema, tab, today) {
   if (tab === "pending_verification") return validated === "Yes" && verified !== "Verified OK";
   if (tab === "amc_due") {
     return warrantyExpired(readSemantic(data, schema, "end_date"), today) && effectiveAmc(data, schema, today) === "AMC Due";
+  }
+  if (tab === "proposal_sent") return effectiveAmc(data, schema, today) === "Proposal Sent";
+  if (tab === "active_amcs") return effectiveAmc(data, schema, today) === "Acknowledged";
+  if (tab === "follow_up_due") {
+    const follow = dateOnly(readSemantic(data, schema, "next_follow_up"));
+    return Boolean(follow) && follow <= today;
   }
   return false;
 }
@@ -123,6 +186,8 @@ module.exports = {
   warrantyExpired,
   warrantyLive,
   effectiveAmc,
+  writeDays,
+  groupKeyForColumn,
   overlayData,
   matchesTab,
   matchesQuery,

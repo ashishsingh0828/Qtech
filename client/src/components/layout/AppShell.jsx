@@ -11,13 +11,14 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import NotificationBell from "./NotificationBell";
+import CommandPalette from "./CommandPalette";
 import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../toast-context";
 import { API_BASE, authConfig, clearSession, errorMessage, initials } from "../../lib/session";
 import "./shell.css";
 
 const NAV = [
-  { to: "/dashboard", label: "Datasets", icon: Database, adminOnly: false },
+  { to: "/dashboard", label: "Home", icon: Database, adminOnly: false },
   { to: "/users", label: "Users", icon: Users, manageUsers: true },
   { to: "/audit", label: "Audit Trail", icon: Clock, adminOnly: false },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },
@@ -28,7 +29,7 @@ function pageTitle(pathname) {
   if (pathname.startsWith("/users")) return "Users & Permissions";
   if (pathname.startsWith("/audit")) return "Audit Trail";
   if (pathname.startsWith("/settings")) return "Settings";
-  return "Datasets";
+  return "Home";
 }
 
 function AppShell() {
@@ -49,12 +50,21 @@ function AppShell() {
   const [nextPassword, setNextPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const bleed = location.pathname.startsWith("/datasets/");
   const title = pageTitle(location.pathname);
 
   useEffect(() => {
     function onKey(event) {
+      const target = event.target;
+      const typing = target instanceof HTMLElement
+        && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         searchRef.current?.focus();
       }
@@ -153,7 +163,7 @@ function AppShell() {
               placeholder="Search datasets"
               aria-label="Search datasets"
             />
-            <kbd>Ctrl + K</kbd>
+            <kbd>/</kbd>
           </form>
           <div className="topbar-profile">
             <NotificationBell />
@@ -191,6 +201,7 @@ function AppShell() {
         <div className={bleed ? "shell-content is-bleed" : "shell-content"}>
           <Outlet />
         </div>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
         {passwordOpen ? (
           <div className="modal-backdrop" onClick={() => { if (!savingPassword) setPasswordOpen(false); }}>
             <form className="password-card" onSubmit={savePassword} onClick={(event) => event.stopPropagation()}>

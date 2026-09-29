@@ -20,6 +20,23 @@ export function statusTone(value) {
   return STATUS_TONE[String(value || "")] || "";
 }
 
+export function shiftISO(iso, days) {
+  const [year, month, day] = String(iso).split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utc.toISOString().slice(0, 10);
+}
+
+export function dueTone(value, timeZone) {
+  const text = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}/.test(text)) return "stone";
+  const today = todayISO(timeZone);
+  const iso = text.slice(0, 10);
+  if (iso < today) return "ruby";
+  if (iso <= shiftISO(today, 15)) return "amber";
+  return "stone";
+}
+
 export function todayISO(timeZone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timeZone || "Asia/Kolkata",

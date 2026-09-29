@@ -12,21 +12,20 @@
 
 .toast {
   padding: 12px 14px;
+  border: 1px solid var(--hairline);
   border-radius: 12px;
-  border: 1px solid #c7d2fe;
-  background: #0f172a;
-  color: #ffffff;
-  box-shadow: 0 12px 30px rgba(16, 32, 51, 0.18);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--float);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .toast-success {
-  background: #3730a3;
-  border-color: #312e81;
+  border-color: var(--hairline);
 }
 
 .toast-error {
-  background: #8d3326;
-  border-color: #6f261c;
+  border-color: var(--hairline);
+  color: var(--ruby);
 }

@@ -66,6 +66,8 @@ const serverManagedSemantics = [
   "amc_status",
   "ack_at",
   "warranty_live",
+  "days",
+  "next_due_pms",
 ];
 
 function normalizeRole(role) {

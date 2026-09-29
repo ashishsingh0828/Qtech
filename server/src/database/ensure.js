@@ -61,6 +61,13 @@ async function applySchema() {
     )
   `);
   await pool.query("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, is_read, created_at DESC)");
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(40)");
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS row_id INTEGER");
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_name VARCHAR(150)");
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)");
+  await pool.query("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS summary TEXT");
+  await pool.query("UPDATE notifications SET row_id = record_id WHERE row_id IS NULL AND record_id IS NOT NULL");
+  await pool.query("UPDATE notifications SET summary = message WHERE summary IS NULL AND message IS NOT NULL");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS activity_log (
       id SERIAL PRIMARY KEY,

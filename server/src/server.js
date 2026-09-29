@@ -11,6 +11,7 @@ const authRoutes = require("./routes/authRoutes");
 const datasetRoutes = require("./routes/datasetRoutes");
 const userRoutes = require("./routes/userRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const { getDashboard } = require("./controllers/dashboardController");
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use("/api/datasets", datasetRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.get("/api/audit-logs", requireAuth, getWorkspaceAuditLogs);
+app.get("/api/dashboard", requireAuth, getDashboard);
 
 ensureSchema()
   .then(() => bootstrapAdmin())

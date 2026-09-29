@@ -5,6 +5,7 @@ const GROUP_LABELS = {
   instrument_details: "Instrument Details",
   amc: "AMC",
   follow_up: "Follow up",
+  schedule_services: "Schedule Services",
 };
 
 const SYSTEM_COLUMNS = [
@@ -20,6 +21,7 @@ const SYSTEM_COLUMNS = [
   { key: "ack_note", label: "Acknowledgement Note", groupKey: "amc", type: "text", semantic: "ack_note" },
   { key: "ack_at", label: "Acknowledged At", groupKey: "amc", type: "datetime", semantic: "ack_at" },
   { key: "next_follow_up", label: "Next Follow Up", groupKey: "follow_up", type: "date", semantic: "next_follow_up" },
+  { key: "next_due_pms", label: "Next Due PMS", groupKey: "schedule_services", type: "date", semantic: "next_due_pms", computed: true },
 ];
 
 function cloneSchema(schema) {
@@ -103,12 +105,12 @@ function ensureSystemColumns(schema) {
     next.columns.push(created);
   });
   reindex(next);
-  next.systemVersion = 1;
+  next.systemVersion = 2;
   return { schema: next, rekeys };
 }
 
 function systemReady(schema) {
-  if (schema?.systemVersion !== 1) return false;
+  if (schema?.systemVersion !== 2) return false;
   return SYSTEM_COLUMNS.every((definition) => {
     const column = (schema.columns || []).find((entry) => entry.key === definition.key && entry.semantic === definition.semantic && entry.system);
     const group = (schema.groups || []).find((entry) => entry.id === column?.groupId);
@@ -124,6 +126,7 @@ function applyRekeys(data, rekeys) {
     delete next[from];
   });
   delete next.warranty_live;
+  delete next.next_due_pms;
   return next;
 }
 

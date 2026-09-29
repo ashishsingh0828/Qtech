@@ -182,8 +182,13 @@ CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     message TEXT NOT NULL,
+    summary TEXT,
+    type VARCHAR(40),
     dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE,
     record_id INTEGER REFERENCES records(id) ON DELETE SET NULL,
+    row_id INTEGER,
+    actor_name VARCHAR(150),
+    customer_name VARCHAR(255),
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
