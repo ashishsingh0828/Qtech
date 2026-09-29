@@ -1,0 +1,50 @@
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0e6e62;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.back-link:hover {
+  color: #0a534a;
+}
+
+.fields-section {
+  padding: 8px 0 8px;
+}
+
+.fields-section h2 {
+  margin: 22px 28px 0;
+  color: #102033;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.fields-table-wrap {
+  margin-top: 16px;
+}
+
+.field-key {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #f4f1ea;
+  color: #243246;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+}
+
+.back-link:focus-visible {
+  outline: 2px solid #0e6e62;
+  outline-offset: 2px;
+  border-radius: 4px;
+}

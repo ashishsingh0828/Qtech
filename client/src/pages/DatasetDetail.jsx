@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { Database, FolderOpen, LogOut, Plus, X } from "lucide-react";
+import { ArrowLeft, Database, LogOut, Plus, X } from "lucide-react";
 import "./Dashboard.css";
+import "./DatasetDetail.css";
 
 const API_BASE = "http://localhost:5000";
+const FIELD_TYPES = ["text", "number", "date", "boolean", "email"];
 
 function readUser() {
   try {
@@ -27,17 +29,12 @@ function formatRole(role) {
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function formatDate(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function toFieldKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function authConfig() {
@@ -52,8 +49,9 @@ function errorMessage(error, fallback) {
   return error.response?.data?.error || error.response?.data?.message || fallback;
 }
 
-function Dashboard() {
+function DatasetDetail() {
   const navigate = useNavigate();
+  const { id } = useParams();
   const user = readUser();
   const roleLabel = formatRole(user?.role);
   const roleClass =
@@ -63,28 +61,29 @@ function Dashboard() {
         ? "role-badge role-manager"
         : "role-badge";
 
-  const [datasets, setDatasets] = useState([]);
+  const [dataset, setDataset] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [fieldName, setFieldName] = useState("");
+  const [fieldKey, setFieldKey] = useState("");
+  const [fieldKeyTouched, setFieldKeyTouched] = useState(false);
+  const [fieldType, setFieldType] = useState("text");
+  const [isRequired, setIsRequired] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     let active = true;
 
-    async function loadDatasets() {
+    async function loadDataset() {
       setLoading(true);
       setError("");
 
       try {
-        const { data } = await axios.get(`${API_BASE}/api/datasets`, authConfig());
-        if (active) {
-          setDatasets(data.datasets || []);
-        }
+        const { data } = await axios.get(`${API_BASE}/api/datasets/${id}`, authConfig());
+        if (active) setDataset(data.dataset);
       } catch (err) {
         if (!active) return;
         if (err.response?.status === 401) {
@@ -92,18 +91,19 @@ function Dashboard() {
           navigate("/login");
           return;
         }
-        setError(errorMessage(err, "Unable to load datasets."));
+        setDataset(null);
+        setError(errorMessage(err, "Unable to load this dataset."));
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    loadDatasets();
+    loadDataset();
 
     return () => {
       active = false;
     };
-  }, [navigate, refreshKey]);
+  }, [id, navigate, refreshKey]);
 
   useEffect(() => {
     if (!modalOpen) return undefined;
@@ -124,24 +124,35 @@ function Dashboard() {
   }
 
   function openModal() {
-    setName("");
-    setDescription("");
+    setFieldName("");
+    setFieldKey("");
+    setFieldKeyTouched(false);
+    setFieldType("text");
+    setIsRequired(false);
     setFormError("");
     setModalOpen(true);
   }
 
-  async function handleCreate(event) {
+  function handleFieldNameChange(value) {
+    setFieldName(value);
+    if (!fieldKeyTouched) {
+      setFieldKey(toFieldKey(value));
+    }
+  }
+
+  async function handleAddField(event) {
     event.preventDefault();
     setFormError("");
     setSubmitting(true);
 
     try {
       await axios.post(
-        `${API_BASE}/api/datasets`,
+        `${API_BASE}/api/datasets/${id}/fields`,
         {
-          name: name.trim(),
-          description: description.trim(),
-          created_by: user?.id,
+          name: fieldName.trim(),
+          field_key: fieldKey.trim(),
+          field_type: fieldType,
+          is_required: isRequired,
         },
         authConfig()
       );
@@ -153,11 +164,13 @@ function Dashboard() {
         navigate("/login");
         return;
       }
-      setFormError(errorMessage(err, "Unable to create the dataset."));
+      setFormError(errorMessage(err, "Unable to add this column."));
     } finally {
       setSubmitting(false);
     }
   }
+
+  const fields = dataset?.fields || [];
 
   return (
     <div className="dashboard">
@@ -185,13 +198,21 @@ function Dashboard() {
         <section className="dataset-card">
           <div className="dataset-card-head">
             <div>
-              <h1>Datasets / Recent Files</h1>
-              <p>Datasets available in the workspace.</p>
+              <button className="back-link" type="button" onClick={() => navigate("/dashboard")}>
+                <ArrowLeft size={16} aria-hidden="true" />
+                Datasets
+              </button>
+              <h1>{loading ? "Loading dataset…" : dataset?.name || "Dataset"}</h1>
+              {!loading && dataset ? (
+                <p>{dataset.description || "No description"}</p>
+              ) : null}
             </div>
-            <button className="upload-button" type="button" onClick={openModal}>
-              <Plus size={18} strokeWidth={2} aria-hidden="true" />
-              Create Dataset
-            </button>
+            {dataset ? (
+              <button className="upload-button" type="button" onClick={openModal}>
+                <Plus size={18} strokeWidth={2} aria-hidden="true" />
+                Add Column
+              </button>
+            ) : null}
           </div>
 
           {error ? (
@@ -200,45 +221,38 @@ function Dashboard() {
             </p>
           ) : null}
 
-          {loading ? <p className="page-message">Loading datasets…</p> : null}
+          {dataset ? (
+            <div className="fields-section">
+              <h2>Manage Columns / Fields</h2>
 
-          {!loading && !error && datasets.length === 0 ? (
-            <div className="dataset-placeholder">
-              <FolderOpen size={28} strokeWidth={1.5} aria-hidden="true" />
-              <p>No datasets yet. Create one to get started.</p>
-            </div>
-          ) : null}
-
-          {!loading && datasets.length > 0 ? (
-            <div className="dataset-table-wrap">
-              <table className="dataset-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Created At</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {datasets.map((dataset) => (
-                    <tr key={dataset.id}>
-                      <td>{dataset.name}</td>
-                      <td>{dataset.description || "—"}</td>
-                      <td>{formatDate(dataset.created_at)}</td>
-                      <td>
-                        <button
-                          className="row-action"
-                          type="button"
-                          onClick={() => navigate(`/datasets/${dataset.id}`)}
-                        >
-                          Open
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {fields.length === 0 ? (
+                <p className="page-message">No columns yet. Add the first field for this dataset.</p>
+              ) : (
+                <div className="dataset-table-wrap fields-table-wrap">
+                  <table className="dataset-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Field key</th>
+                        <th>Field type</th>
+                        <th>Required</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fields.map((field) => (
+                        <tr key={field.id}>
+                          <td>{field.name}</td>
+                          <td>
+                            <code className="field-key">{field.field_key}</code>
+                          </td>
+                          <td>{field.field_type}</td>
+                          <td>{field.is_required ? "Yes" : "No"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : null}
         </section>
@@ -255,11 +269,11 @@ function Dashboard() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="create-dataset-title"
+            aria-labelledby="add-field-title"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-heading">
-              <h2 id="create-dataset-title">Create Dataset</h2>
+              <h2 id="add-field-title">Add Column</h2>
               <button
                 className="icon-button"
                 type="button"
@@ -271,7 +285,7 @@ function Dashboard() {
               </button>
             </div>
 
-            <form className="modal-form" onSubmit={handleCreate}>
+            <form className="modal-form" onSubmit={handleAddField}>
               {formError ? (
                 <p className="page-error" role="alert">
                   {formError}
@@ -282,8 +296,8 @@ function Dashboard() {
                 Name
                 <input
                   type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
+                  value={fieldName}
+                  onChange={(event) => handleFieldNameChange(event.target.value)}
                   required
                   autoFocus
                   maxLength={255}
@@ -291,12 +305,37 @@ function Dashboard() {
               </label>
 
               <label>
-                Description
-                <textarea
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  rows={4}
+                Field key
+                <input
+                  type="text"
+                  value={fieldKey}
+                  onChange={(event) => {
+                    setFieldKeyTouched(true);
+                    setFieldKey(event.target.value);
+                  }}
+                  required
+                  maxLength={255}
                 />
+              </label>
+
+              <label>
+                Field type
+                <select value={fieldType} onChange={(event) => setFieldType(event.target.value)}>
+                  {FIELD_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={isRequired}
+                  onChange={(event) => setIsRequired(event.target.checked)}
+                />
+                Required
               </label>
 
               <div className="modal-actions">
@@ -309,7 +348,7 @@ function Dashboard() {
                   Cancel
                 </button>
                 <button className="upload-button" type="submit" disabled={submitting}>
-                  {submitting ? "Creating…" : "Create Dataset"}
+                  {submitting ? "Adding…" : "Add Column"}
                 </button>
               </div>
             </form>
@@ -320,4 +359,4 @@ function Dashboard() {
   );
 }
 
-export default Dashboard;
+export default DatasetDetail;

@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import DatasetDetail from "./pages/DatasetDetail";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -23,6 +24,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/datasets/:id"
+          element={
+            <ProtectedRoute>
+              <DatasetDetail />
             </ProtectedRoute>
           }
         />
