@@ -1,39 +1,18 @@
 const { requireAuth } = require("./authMiddleware");
+const { hasPermission } = require("../../../shared/permissions");
 
-function canonicalRole(role) {
-  const normalized = String(role || "")
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .trim();
-
-  if (normalized === "admin") return "Admin";
-  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
-    return "Manager";
-  }
-  if (normalized === "validator") return "Validator";
-  if (normalized === "service") return "Service";
-
-  return String(role || "");
-}
-
-function requireRole(allowedRoles) {
-  const allowed = new Set(allowedRoles.map((role) => canonicalRole(role)));
-
-  return function roleGuard(req, res, next) {
-    if (!req.user) {
-      return res.status(401).json({ error: "Authentication required" });
+function requirePermission(flag) {
+  return function permissionGuard(req, res, next) {
+    if (!req.user) return res.status(401).json({ error: "Authentication required" });
+    if (!hasPermission(req.user.role, flag)) {
+      return res.status(403).json({
+        error: "You do not have permission for this action",
+        code: "FORBIDDEN",
+        requiredPermission: flag,
+      });
     }
-
-    if (!allowed.has(canonicalRole(req.user.role))) {
-      return res.status(403).json({ error: "You do not have permission for this action" });
-    }
-
     return next();
   };
 }
 
-module.exports = {
-  requireAuth,
-  requireRole,
-  canonicalRole,
-};
+module.exports = { requireAuth, requirePermission };

@@ -1,5 +1,5 @@
 const pool = require("../config/db");
-const { canonicalRole } = require("../middleware/auth");
+const { normalizeRole } = require("../../../shared/permissions");
 const { ensureSchema } = require("../database/ensure");
 
 const getFieldPermissions = async (req, res) => {
@@ -61,7 +61,7 @@ const getFieldPermissions = async (req, res) => {
     res.json({
       user: {
         ...person.rows[0],
-        role: canonicalRole(person.rows[0].role),
+        role: normalizeRole(person.rows[0].role),
       },
       fields: fields.rows,
     });

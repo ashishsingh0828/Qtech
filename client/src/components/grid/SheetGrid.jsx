@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Lock } from "lucide-react";
+import { useToast } from "../toast-context";
 import { formatCell, orderedColumns, pinnedCount, rawCell } from "../../lib/sheetFormat";
 import "./SheetGrid.css";
 
@@ -18,9 +20,15 @@ function SheetGrid({
   onAddRow,
   onDeleteRow,
   canDelete,
+  canAddRow,
+  canRename,
+  editableKeys,
+  denialMessage,
   adding,
   autoNamed,
 }) {
+  const { notify } = useToast();
+  const editable = new Set(editableKeys || []);
   const scrollerRef = useRef(null);
   const [viewport, setViewport] = useState({ width: 1440, height: 900, top: 0, left: 0 });
   const [editing, setEditing] = useState(null);
@@ -79,6 +87,10 @@ function SheetGrid({
   }
 
   function beginEdit(row, column) {
+    if (!editable.has(column.key)) {
+      notify(denialMessage || "You cannot edit that column.");
+      return;
+    }
     setCellError("");
     setRenaming(null);
     setEditing({ rowId: row.id, key: column.key });
@@ -103,6 +115,7 @@ function SheetGrid({
   }
 
   function beginRename(column) {
+    if (!canRename) return;
     setEditing(null);
     setRenaming(column.key);
     setRenameDraft(column.label);
@@ -158,7 +171,14 @@ function SheetGrid({
                     className={`sheet-banner tint-${group.tint || "general"}`}
                     style={{ width }}
                   >
-                    <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }}>{group.label}</span>
+                    <span className="sheet-banner-label" style={{ left: sticks ? pinWidth : 8 }}>
+                      {group.label}
+                      {columns.every((column) => column.groupId !== group.id || !editable.has(column.key)) ? (
+                        <span className="sheet-lock" title={denialMessage || "Read only"}>
+                          <Lock size={12} aria-label="Read only" />
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
                 );
               })}
@@ -208,7 +228,11 @@ function SheetGrid({
                   return (
                     <div
                       key={column.key}
-                      className={pinned ? "sheet-cell is-sticky" : "sheet-cell"}
+                      className={[
+                        "sheet-cell",
+                        pinned ? "is-sticky" : "",
+                        editable.has(column.key) ? "" : "is-readonly",
+                      ].filter(Boolean).join(" ")}
                       style={{
                         width: column.width || 160,
                         left: pinned ? widths[columnIndex] : undefined,
@@ -250,9 +274,11 @@ function SheetGrid({
         </div>
       </div>
       <div className="sheet-foot">
-        <button className="sheet-text-button" type="button" onClick={onAddRow} disabled={adding || !columns.length}>
-          {adding ? "Adding row…" : "Add row"}
-        </button>
+        {canAddRow ? (
+          <button className="sheet-text-button" type="button" onClick={onAddRow} disabled={adding || !columns.length}>
+            {adding ? "Adding row…" : "Add row"}
+          </button>
+        ) : null}
         <span>{rows.length} rows</span>
         <span>{columns.length} columns</span>
         <span>{groups.length} groups</span>

@@ -1,13 +1,7 @@
 const pool = require("../config/db");
-const { canonicalRole } = require("../middleware/auth");
 const { ensureSchema } = require("../database/ensure");
 const { ensureMasterFields, findMasterField } = require("../constants/masterFields");
 const { notifyLeadership } = require("./notificationController");
-
-function canVerify(user) {
-  const role = canonicalRole(user?.role);
-  return role === "Admin" || role === "Manager";
-}
 
 function parseDate(value, label) {
   if (value == null || String(value).trim() === "") return "";
@@ -242,9 +236,6 @@ const validateRecord = async (req, res) => {
 const verifyRecord = async (req, res) => {
   const parsed = ids(req);
   if (parsed.error) return res.status(parsed.error.status).json({ error: parsed.error.message });
-  if (!canVerify(req.user)) {
-    return res.status(403).json({ error: "Only an Admin or Manager can verify a record" });
-  }
   await ensureSchema();
 
   const client = await pool.connect();

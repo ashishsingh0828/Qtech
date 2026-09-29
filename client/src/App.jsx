@@ -7,13 +7,19 @@ import AuditPage from "./pages/AuditPage";
 import SettingsPage from "./pages/SettingsPage";
 import AppShell from "./components/layout/AppShell";
 import { ToastProvider } from "./components/Toast";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
 
 function ProtectedRoute({ children }) {
-  const token = localStorage.getItem("token");
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+  const { ready, session } = useAuth();
+  if (!ready) return <main className="login-screen">Loading…</main>;
+  if (!session) return <Navigate to="/login" replace />;
   return children;
+}
+
+function UsersRoute() {
+  const { session } = useAuth();
+  if (!session?.permissions?.canManageUsers) return <Navigate to="/dashboard" replace />;
+  return <UsersPage />;
 }
 
 function NotFound() {
@@ -33,26 +39,28 @@ function NotFound() {
 function App() {
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/login" element={<Login />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/datasets/:id" element={<DatasetDetail />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </ToastProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/login" element={<Login />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppShell />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/datasets/:id" element={<DatasetDetail />} />
+              <Route path="/users" element={<UsersRoute />} />
+              <Route path="/audit" element={<AuditPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </ToastProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

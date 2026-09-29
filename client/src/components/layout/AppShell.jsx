@@ -9,13 +9,16 @@ import {
   Settings,
   Users,
 } from "lucide-react";
+import axios from "axios";
 import NotificationBell from "./NotificationBell";
-import { formatRole, initials, isAdminRole, readUser, roleBadgeClass } from "../../lib/session";
+import { useAuth } from "../../auth/AuthProvider";
+import { useToast } from "../toast-context";
+import { API_BASE, authConfig, clearSession, errorMessage, initials } from "../../lib/session";
 import "./shell.css";
 
 const NAV = [
   { to: "/dashboard", label: "Datasets", icon: Database, adminOnly: false },
-  { to: "/users", label: "Users & Permissions", icon: Users, adminOnly: false },
+  { to: "/users", label: "Users", icon: Users, manageUsers: true },
   { to: "/audit", label: "Audit Trail", icon: Clock, adminOnly: false },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },
 ];
@@ -31,13 +34,21 @@ function pageTitle(pathname) {
 function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const user = readUser();
-  const roleLabel = formatRole(user?.role);
+  const { notify } = useToast();
+  const { session } = useAuth();
+  const user = session?.user;
+  const permissions = session?.permissions || {};
+  const roleLabel = user?.roleTitle || "User";
   const searchRef = useRef(null);
   const menuRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [nextPassword, setNextPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
   const bleed = location.pathname.startsWith("/datasets/");
   const title = pageTitle(location.pathname);
 
@@ -62,8 +73,28 @@ function AppShell() {
   }, [menuOpen]);
 
   function handleLogout() {
-    localStorage.clear();
-    navigate("/login");
+    clearSession(navigate);
+  }
+
+  async function savePassword(event) {
+    event.preventDefault();
+    setSavingPassword(true);
+    setPasswordError("");
+    try {
+      await axios.patch(
+        `${API_BASE}/api/auth/password`,
+        { currentPassword, newPassword: nextPassword },
+        authConfig()
+      );
+      setPasswordOpen(false);
+      setCurrentPassword("");
+      setNextPassword("");
+      notify("Password updated");
+    } catch (err) {
+      setPasswordError(errorMessage(err, "Unable to change password."));
+    } finally {
+      setSavingPassword(false);
+    }
   }
 
   function submitSearch(event) {
@@ -82,7 +113,7 @@ function AppShell() {
           <strong>QTech</strong>
         </div>
         <nav className="side-nav" aria-label="Workspace">
-          {NAV.filter((item) => !item.adminOnly || isAdminRole(user?.role)).map((item) => {
+          {NAV.filter((item) => !item.manageUsers || permissions.canManageUsers).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink
@@ -98,7 +129,7 @@ function AppShell() {
           })}
         </nav>
         <div className="sidebar-foot">
-          <span className={roleBadgeClass(user?.role)}>{roleLabel}</span>
+          <span className={`role-pill role-${user?.role || "user"}`}>{roleLabel}</span>
           <button className="collapse-button" type="button" onClick={() => setCollapsed((value) => !value)}>
             <PanelLeft size={18} aria-hidden="true" />
             <span className="collapse-label">{collapsed ? "Expand" : "Collapse"}</span>
@@ -139,12 +170,15 @@ function AppShell() {
                 </span>
                 <span className="profile-copy">
                   <strong>{user?.name || "Signed in"}</strong>
-                  <span className={roleBadgeClass(user?.role)}>{roleLabel}</span>
+                  <span className={`role-pill role-${user?.role || "user"}`}>{roleLabel}</span>
                 </span>
               </button>
               {menuOpen ? (
                 <div className="avatar-pop" role="menu">
                   <p>{user?.email || "Signed in"}</p>
+                  <button className="profile-logout" type="button" role="menuitem" onClick={() => { setMenuOpen(false); setPasswordOpen(true); }}>
+                    Change password
+                  </button>
                   <button className="profile-logout" type="button" role="menuitem" onClick={handleLogout}>
                     <LogOut size={16} aria-hidden="true" />
                     Logout
@@ -157,6 +191,26 @@ function AppShell() {
         <div className={bleed ? "shell-content is-bleed" : "shell-content"}>
           <Outlet />
         </div>
+        {passwordOpen ? (
+          <div className="modal-backdrop" onClick={() => { if (!savingPassword) setPasswordOpen(false); }}>
+            <form className="password-card" onSubmit={savePassword} onClick={(event) => event.stopPropagation()}>
+              <h2>Change password</h2>
+              <label>
+                Current password
+                <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required />
+              </label>
+              <label>
+                New password
+                <input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} minLength={8} required />
+              </label>
+              {passwordError ? <p className="login-error">{passwordError}</p> : null}
+              <div className="password-actions">
+                <button className="profile-logout" type="button" onClick={() => setPasswordOpen(false)} disabled={savingPassword}>Cancel</button>
+                <button className="login-submit" type="submit" disabled={savingPassword}>{savingPassword ? "Saving…" : "Update password"}</button>
+              </div>
+            </form>
+          </div>
+        ) : null}
       </div>
     </div>
   );

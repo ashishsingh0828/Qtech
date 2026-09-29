@@ -3,22 +3,23 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import SheetGrid from "../components/grid/SheetGrid";
 import { useToast } from "../components/toast-context";
+import { useAuth } from "../auth/AuthProvider";
+import { editDenialMessage, getEditableColumnKeys } from "@shared/permissions.js";
 import {
   API_BASE,
   authConfig,
-  canDeleteRole,
   clearSession,
   downloadName,
   errorMessage,
   messageFromResponse,
-  readUser,
 } from "../lib/session";
 
 function DatasetDetail() {
   const navigate = useNavigate();
   const { notify } = useToast();
+  const { session } = useAuth();
+  const permissions = session?.permissions || {};
   const { id } = useParams();
-  const canDelete = canDeleteRole(readUser()?.role);
   const [dataset, setDataset] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -198,7 +199,11 @@ function DatasetDetail() {
         onRename={renameColumn}
         onAddRow={addRow}
         onDeleteRow={deleteRow}
-        canDelete={canDelete}
+        canDelete={Boolean(permissions.canDeleteRow)}
+        canAddRow={Boolean(permissions.canAddRow)}
+        canRename={Boolean(permissions.canEditSchema)}
+        editableKeys={getEditableColumnKeys(session?.role, dataset?.schema)}
+        denialMessage={editDenialMessage(session?.role, dataset?.schema)}
         adding={adding}
         autoNamed={autoNamed}
       />

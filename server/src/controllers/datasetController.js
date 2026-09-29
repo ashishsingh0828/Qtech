@@ -1,6 +1,6 @@
 const pool = require("../config/db");
-const { canonicalRole } = require("../middleware/auth");
-const { canDeleteFiles, roleCanEditField, notifiesLeadership } = require("../constants/access");
+const { hasPermission } = require("../../../shared/permissions");
+const { roleCanEditField, notifiesLeadership } = require("../constants/access");
 const { notifyLeadership } = require("./notificationController");
 const { ensureSchema } = require("../database/ensure");
 const { ensureMasterFields, MASTER_FIELDS } = require("../constants/masterFields");
@@ -18,10 +18,6 @@ function ensureArchiveColumn() {
 
 const FIELD_TYPES = new Set(["text", "number", "date", "boolean", "email"]);
 
-function isAdmin(user) {
-  return canonicalRole(user?.role) === "Admin";
-}
-
 function parseAggregatedValues(value) {
   if (!value) return {};
   if (typeof value === "string") {
@@ -37,9 +33,6 @@ function parseAggregatedValues(value) {
 
 async function listAccessibleFields(datasetId, user) {
   await ensureSchema();
-  const admin = isAdmin(user);
-  const seeAll = admin || canonicalRole(user?.role) === "Manager";
-  const userId = Number(user?.id) || 0;
   const result = await pool.query(
     `
     SELECT
@@ -51,44 +44,19 @@ async function listAccessibleFields(datasetId, user) {
       f.position,
       f.is_required,
       f.group_name,
-      f.created_at,
-      CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_view, TRUE) END AS can_view,
-      CASE WHEN $3::boolean THEN TRUE ELSE COALESCE(fp.can_edit, TRUE) END AS can_edit
+      f.created_at
     FROM fields f
-    LEFT JOIN field_permissions fp
-      ON fp.field_id = f.id
-     AND fp.user_id = $2
     WHERE f.dataset_id = $1
       AND f.is_deleted = FALSE
-      AND ($3::boolean OR COALESCE(fp.can_view, TRUE) = TRUE)
     ORDER BY f.position ASC, f.id ASC
     `,
-    [datasetId, userId, seeAll]
+    [datasetId]
   );
   return result.rows.map((field) => ({
     ...field,
-    can_edit: roleCanEditField(user, field) && (seeAll || field.can_edit !== false),
-    can_view: seeAll ? true : field.can_view,
+    can_view: true,
+    can_edit: roleCanEditField(user, field),
   }));
-}
-
-function isManagerUser(user) {
-  return canonicalRole(user?.role) === "Manager";
-}
-
-async function assertCanEditField(client, user, fieldId) {
-  if (isAdmin(user)) return true;
-  const userId = Number(user?.id) || 0;
-  const result = await client.query(
-    `
-    SELECT COALESCE(can_view, TRUE) AS can_view, COALESCE(can_edit, TRUE) AS can_edit
-    FROM field_permissions
-    WHERE user_id = $1 AND field_id = $2
-    `,
-    [userId, fieldId]
-  );
-  if (!result.rows.length) return true;
-  return Boolean(result.rows[0].can_view) && Boolean(result.rows[0].can_edit);
 }
 
 function normalizeFieldKey(value) {
@@ -103,8 +71,12 @@ function normalizeFieldKey(value) {
 const getDatasets = async (req, res) => {
   const includeDeleted = String(req.query.include_deleted || "").toLowerCase() === "true";
 
-  if (includeDeleted && canonicalRole(req.user?.role) !== "Admin") {
-    return res.status(403).json({ error: "Only an Admin can view archived datasets" });
+  if (includeDeleted && !hasPermission(req.user?.role, "canDeleteDataset")) {
+    return res.status(403).json({
+      error: "You do not have permission for this action",
+      code: "FORBIDDEN",
+      requiredPermission: "canDeleteDataset",
+    });
   }
 
   try {
@@ -468,8 +440,6 @@ const getRecords = async (req, res) => {
     }
 
     await ensureSchema();
-    const admin = isAdmin(req.user);
-    const userId = Number(req.user?.id) || 0;
 
     const recordsResult = await pool.query(
       `
@@ -486,22 +456,12 @@ const getRecords = async (req, res) => {
       LEFT JOIN fields f
         ON f.id = rv.field_id
        AND f.is_deleted = FALSE
-       AND (
-         $2::boolean
-         OR NOT EXISTS (
-           SELECT 1
-           FROM field_permissions fp
-           WHERE fp.field_id = f.id
-             AND fp.user_id = $3
-             AND fp.can_view = FALSE
-         )
-       )
       WHERE r.dataset_id = $1
         AND r.is_deleted = FALSE
       GROUP BY r.id, r.position, r.created_at
       ORDER BY r.position ASC NULLS LAST, r.created_at ASC, r.id ASC
       `,
-      [datasetId, admin, userId]
+      [datasetId]
     );
 
     res.json({
@@ -568,20 +528,28 @@ const createRecord = async (req, res) => {
       return res.status(400).json({ error: "Add columns before creating rows" });
     }
 
-    if (!isAdmin(req.user)) {
-      const accessible = await listAccessibleFields(datasetId, req.user);
-      const accessByKey = new Map(accessible.map((field) => [field.field_key, field]));
-      for (const key of Object.keys(rawValues)) {
-        const field = fieldsResult.rows.find((entry) => entry.field_key === key);
-        if (!field) continue;
-        const access = accessByKey.get(key);
-        const raw = rawValues[key];
-        const filled = !(raw == null || raw === "" || raw === false);
-        if ((!access || !access.can_edit) && filled) {
-          await client.query("ROLLBACK");
-          return res.status(403).json({ error: "You do not have permission to edit this column" });
-        }
+    const unknown = [];
+    const blocked = [];
+    for (const key of Object.keys(rawValues)) {
+      const field = fieldsResult.rows.find((entry) => entry.field_key === key);
+      if (!field) {
+        unknown.push(key);
+        continue;
       }
+      if (!roleCanEditField(req.user, field)) blocked.push(key);
+    }
+    if (unknown.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Unknown column", unknownFields: unknown });
+    }
+    if (blocked.length) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({
+        error: "You do not have permission to edit these fields",
+        code: "FORBIDDEN",
+        requiredPermission: "canEditColumn",
+        blockedFields: blocked,
+      });
     }
 
     const entries = [];
@@ -794,10 +762,6 @@ const deleteRecord = async (req, res) => {
     return res.status(400).json({ error: "Invalid record id" });
   }
 
-  if (!canDeleteFiles(req.user)) {
-    return res.status(403).json({ error: "You do not have permission to delete rows" });
-  }
-
   try {
     const result = await pool.query(
       "DELETE FROM records WHERE id = $1 AND dataset_id = $2 RETURNING id",
@@ -870,12 +834,12 @@ const updateCell = async (req, res) => {
     const field = fieldResult.rows[0];
     if (!roleCanEditField(req.user, field)) {
       await client.query("ROLLBACK");
-      return res.status(403).json({ error: "You do not have permission to edit this column" });
-    }
-    const allowed = isManagerUser(req.user) || await assertCanEditField(client, req.user, fieldId);
-    if (!allowed) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({ error: "You do not have permission to edit this column" });
+      return res.status(403).json({
+        error: "You do not have permission to edit these fields",
+        code: "FORBIDDEN",
+        requiredPermission: "canEditColumn",
+        blockedFields: [field.field_key],
+      });
     }
 
     const normalized = normalizeCellValue(field, req.body?.value);
@@ -1036,8 +1000,6 @@ const deleteField = async (req, res) => {
 const getWorkspaceAuditLogs = async (req, res) => {
   try {
     await ensureSchema();
-    const admin = isAdmin(req.user);
-    const userId = Number(req.user?.id) || 0;
     const result = await pool.query(
       `
       SELECT
@@ -1056,20 +1018,9 @@ const getWorkspaceAuditLogs = async (req, res) => {
       JOIN users u ON u.id = a.changed_by
       JOIN fields f ON f.id = a.field_id
       WHERE d.is_deleted = FALSE
-        AND (
-          $1::boolean
-          OR NOT EXISTS (
-            SELECT 1
-            FROM field_permissions fp
-            WHERE fp.field_id = a.field_id
-              AND fp.user_id = $2
-              AND fp.can_view = FALSE
-          )
-        )
       ORDER BY a.changed_at DESC
       LIMIT 80
-      `,
-      [admin, userId]
+      `
     );
     res.json({ logs: result.rows });
   } catch (error) {

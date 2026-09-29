@@ -1,9 +1,10 @@
-import { formatRole, readUser } from "../lib/session";
+import { useAuth } from "../auth/AuthProvider";
 import "../components/grid/grid.css";
 import "../components/layout/shell.css";
 
 function SettingsPage() {
-  const user = readUser();
+  const { session } = useAuth();
+  const user = session?.user;
   return (
     <div className="page-frame">
       <div className="page-heading">
@@ -24,7 +25,7 @@ function SettingsPage() {
           </div>
           <div>
             <span>Role</span>
-            <strong>{formatRole(user?.role)}</strong>
+            <strong>{user?.roleTitle || "User"}</strong>
           </div>
         </div>
       </section>

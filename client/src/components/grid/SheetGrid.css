@@ -111,6 +111,19 @@
   display: flex;
 }
 
+.sheet-cell.is-readonly {
+  color: #94a3b8;
+  cursor: default;
+  user-select: text;
+}
+
+.sheet-lock {
+  display: inline-flex;
+  margin-left: 6px;
+  color: #78716c;
+  vertical-align: middle;
+}
+
 .sheet-cell {
   display: flex;
   align-items: center;

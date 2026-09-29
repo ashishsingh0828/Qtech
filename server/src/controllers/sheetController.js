@@ -1,6 +1,6 @@
 const zlib = require("zlib");
 const pool = require("../config/db");
-const { canDeleteFiles } = require("../constants/access");
+const { inspectCellEdit } = require("../../../shared/permissions");
 const { ensureSchema } = require("../database/ensure");
 const { parseWorkbook } = require("../excel/parseWorkbook");
 const { buildWorkbook } = require("../excel/exportWorkbook");
@@ -349,6 +349,18 @@ const patchSheetRow = async (req, res) => {
       [Number(req.params.rowId), dataset.id]
     );
     if (!rowResult.rows.length) return res.status(404).json({ error: "Row not found" });
+    const edit = inspectCellEdit(req.user?.role, schema, Object.keys(values));
+    if (edit.unknown.length) {
+      return res.status(400).json({ error: "Unknown column", unknownFields: edit.unknown });
+    }
+    if (edit.blocked.length) {
+      return res.status(403).json({
+        error: "You do not have permission to edit these fields",
+        code: "FORBIDDEN",
+        requiredPermission: "canEditColumn",
+        blockedFields: edit.blocked,
+      });
+    }
     const data = await readRowData(rowResult.rows[0]);
     const normalized = {};
     for (const [key, raw] of Object.entries(values)) {
@@ -381,9 +393,6 @@ const patchSheetRow = async (req, res) => {
 };
 
 const deleteSheetRow = async (req, res) => {
-  if (!canDeleteFiles(req.user)) {
-    return res.status(403).json({ error: "You do not have permission to delete rows" });
-  }
   const userId = Number(req.user?.id);
   try {
     await ensureSchema();

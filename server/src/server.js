@@ -4,6 +4,7 @@ require("dotenv").config();
 
 const pool = require("./config/db");
 const { ensureSchema } = require("./database/ensure");
+const { bootstrapAdmin } = require("./controllers/authController");
 const { requireAuth } = require("./middleware/auth");
 const { getWorkspaceAuditLogs } = require("./controllers/datasetController");
 const authRoutes = require("./routes/authRoutes");
@@ -13,7 +14,23 @@ const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+]);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Routes
@@ -23,9 +40,11 @@ app.use("/api/users", userRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.get("/api/audit-logs", requireAuth, getWorkspaceAuditLogs);
 
-ensureSchema().catch((error) => {
-  console.error("Schema ensure error:", error);
-});
+ensureSchema()
+  .then(() => bootstrapAdmin())
+  .catch((error) => {
+    console.error("Schema ensure error:", error);
+  });
 
 app.get("/", (req, res) => {
   res.json({

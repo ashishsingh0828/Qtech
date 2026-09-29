@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { X } from "lucide-react";
-import { API_BASE, authConfig, clearSession, errorMessage, formatRole } from "../../lib/session";
+import { permissionsFor } from "@shared/permissions.js";
+import { API_BASE, authConfig, clearSession, errorMessage } from "../../lib/session";
 import "../grid/grid.css";
 
 function FieldPermissionManager({ open, datasetId, onClose, navigate }) {
@@ -21,8 +22,8 @@ function FieldPermissionManager({ open, datasetId, onClose, navigate }) {
         const { data } = await axios.get(`${API_BASE}/api/users`, authConfig());
         if (!active) return;
         const managers = (data.users || []).filter((person) => {
-          const role = formatRole(person.role);
-          return role === "Manager" || role === "Validator" || role === "Service";
+          const permissions = permissionsFor(person.role);
+          return permissions && !permissions.canManageUsers;
         });
         setPeople(managers);
         setUserId(managers[0] ? String(managers[0].id) : "");

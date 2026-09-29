@@ -43,6 +43,7 @@ async function applySchema() {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_fields_dataset_id ON fields(dataset_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_audit_logs_record_field ON audit_logs(record_id, field_id)");
   await pool.query("ALTER TABLE fields ADD COLUMN IF NOT EXISTS group_name VARCHAR(120)");
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP");
   await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_file_name VARCHAR(255)");
   await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS row_count INTEGER");
   await pool.query("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS column_count INTEGER");
@@ -60,18 +61,53 @@ async function applySchema() {
     )
   `);
   await pool.query("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, is_read, created_at DESC)");
-  await pool.query(`
-    INSERT INTO roles (name, description)
-    SELECT seed.name, seed.description
-    FROM (VALUES
-      ('Manager', 'Verifies records, deletes files and rows, and receives workflow alerts'),
-      ('Validator', 'Edits data-validation columns only'),
-      ('Service', 'Edits AMC, schedule, complaint, and breakdown columns only')
-    ) AS seed(name, description)
-    WHERE NOT EXISTS (
-      SELECT 1 FROM roles existing WHERE lower(existing.name) = lower(seed.name)
-    )
-  `);
+  await canonicalizeRoles();
+}
+
+async function canonicalizeRoles() {
+  const catalog = [
+    ["admin", ["admin"], "Full workspace access"],
+    ["manager", ["manager", "managing person", "managingperson"], "Edits every group, uploads, and verifies"],
+    ["validator", ["validator"], "Edits data validation only"],
+    ["service", ["service"], "Edits service groups only"],
+  ];
+  for (const [name, aliases, description] of catalog) {
+    let target = await pool.query("SELECT id FROM roles WHERE name = $1 LIMIT 1", [name]);
+    if (!target.rows.length) {
+      const source = await pool.query(
+        `
+        SELECT id
+        FROM roles
+        WHERE lower(replace(replace(name, '_', ' '), '-', ' ')) = ANY($1::text[])
+        ORDER BY id
+        LIMIT 1
+        `,
+        [aliases]
+      );
+      if (source.rows.length) {
+        await pool.query("UPDATE roles SET name = $1, description = $2 WHERE id = $3", [
+          name,
+          description,
+          source.rows[0].id,
+        ]);
+      } else {
+        await pool.query("INSERT INTO roles (name, description) VALUES ($1, $2)", [name, description]);
+      }
+      target = await pool.query("SELECT id FROM roles WHERE name = $1 LIMIT 1", [name]);
+    }
+    await pool.query(
+      `
+      UPDATE users
+      SET role_id = $1
+      WHERE role_id IN (
+        SELECT id FROM roles
+        WHERE lower(replace(replace(name, '_', ' '), '-', ' ')) = ANY($2::text[])
+          AND name <> $3
+      )
+      `,
+      [target.rows[0].id, aliases, name]
+    );
+  }
 }
 
 module.exports = { ensureSchema };

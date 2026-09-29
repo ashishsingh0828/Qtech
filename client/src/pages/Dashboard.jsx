@@ -5,31 +5,8 @@ import { Download, FolderOpen, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, 
 import ExcelDropzone from "../components/import/ExcelDropzone";
 import "./Dashboard.css";
 import { useToast } from "../components/toast-context";
-
-const API_BASE = "http://localhost:5000";
-
-function readUser() {
-  try {
-    return JSON.parse(localStorage.getItem("user") || "null");
-  } catch {
-    return null;
-  }
-}
-
-function formatRole(role) {
-  if (!role) return "User";
-
-  const normalized = String(role).toLowerCase().replace(/[_-]+/g, " ").trim();
-
-  if (normalized === "admin") return "Admin";
-  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
-    return "Manager";
-  }
-  if (normalized === "validator") return "Validator";
-  if (normalized === "service") return "Service";
-
-  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
-}
+import { useAuth } from "../auth/AuthProvider";
+import { API_BASE, authConfig, clearSession, errorMessage, messageFromResponse } from "../lib/session";
 
 function relativeTime(value) {
   if (!value) return "—";
@@ -56,31 +33,6 @@ function initials(name) {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
-function authConfig() {
-  return {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
-    },
-  };
-}
-
-function errorMessage(error, fallback) {
-  return error.response?.data?.error || error.response?.data?.message || fallback;
-}
-
-async function messageFromResponse(error, fallback) {
-  const data = error.response?.data;
-  if (data instanceof Blob) {
-    try {
-      const parsed = JSON.parse(await data.text());
-      return parsed.error || parsed.message || fallback;
-    } catch {
-      return fallback;
-    }
-  }
-  return errorMessage(error, fallback);
-}
-
 function downloadName(datasetName) {
   const cleaned = String(datasetName || "dataset").replace(/[^\w.\- ]+/g, "").trim();
   return `${cleaned || "dataset"}.xlsx`;
@@ -89,9 +41,9 @@ function downloadName(datasetName) {
 function Dashboard() {
   const navigate = useNavigate();
   const { notify } = useToast();
-  const sessionUser = readUser();
-  const isAdmin = formatRole(sessionUser?.role) === "Admin";
-  const canDelete = formatRole(sessionUser?.role) === "Admin" || formatRole(sessionUser?.role) === "Manager";
+  const { session } = useAuth();
+  const canUpload = Boolean(session?.permissions?.canUpload);
+  const canDelete = Boolean(session?.permissions?.canDeleteDataset);
   const [searchParams] = useSearchParams();
   const datasetQuery = (searchParams.get("q") || "").trim().toLowerCase();
 
@@ -142,8 +94,7 @@ function Dashboard() {
       } catch (err) {
         if (!active) return;
         if (err.response?.status === 401) {
-          localStorage.clear();
-          navigate("/login");
+          clearSession(navigate);
           return;
         }
         setError(errorMessage(err, "Unable to load datasets."));
@@ -205,7 +156,7 @@ function Dashboard() {
         {
           name: name.trim(),
           description: description.trim(),
-          created_by: sessionUser?.id,
+          created_by: session?.user?.id,
         },
         authConfig()
       );
@@ -214,8 +165,7 @@ function Dashboard() {
       setRefreshKey((value) => value + 1);
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
+        clearSession(navigate);
         return;
       }
       setFormError(errorMessage(err, "Unable to create the dataset."));
@@ -247,8 +197,7 @@ function Dashboard() {
       notify("Export ready");
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
+        clearSession(navigate);
         return;
       }
       setError(await messageFromResponse(err, "Unable to download this dataset."));
@@ -268,8 +217,7 @@ function Dashboard() {
       setRefreshKey((value) => value + 1);
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
+        clearSession(navigate);
         return;
       }
       setError(errorMessage(err, "Unable to archive this dataset."));
@@ -288,8 +236,7 @@ function Dashboard() {
       setRefreshKey((value) => value + 1);
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
+        clearSession(navigate);
         return;
       }
       setError(errorMessage(err, "Unable to restore this dataset."));
@@ -325,8 +272,7 @@ function Dashboard() {
       setRefreshKey((value) => value + 1);
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.clear();
-        navigate("/login");
+        clearSession(navigate);
         return;
       }
       setRenameError(errorMessage(err, "Unable to rename this dataset."));
@@ -355,7 +301,7 @@ function Dashboard() {
               </p>
             </div>
             <div className="header-actions">
-              {isAdmin ? (
+              {canDelete ? (
                 <button
                   className={showArchived ? "row-action" : "logout-button"}
                   type="button"
@@ -364,7 +310,7 @@ function Dashboard() {
                   {showArchived ? "View Active Datasets" : "View Archived / Deleted Datasets"}
                 </button>
               ) : null}
-              {!showArchived ? (
+              {!showArchived && canUpload ? (
                 <button className="upload-button" type="button" onClick={openModal}>
                   <Plus size={18} strokeWidth={2} aria-hidden="true" />
                   Create Dataset
@@ -373,7 +319,7 @@ function Dashboard() {
             </div>
           </div>
 
-          {!showArchived ? (
+          {!showArchived && canUpload ? (
             <ExcelDropzone
               navigate={navigate}
               onImported={(dataset) => {
@@ -476,7 +422,7 @@ function Dashboard() {
                                 {downloadingId === dataset.id ? "Exporting…" : "Export"}
                               </button>
                             ) : null}
-                            {!dataset.is_deleted ? (
+                            {canUpload && !dataset.is_deleted ? (
                               <button type="button" role="menuitem" onClick={() => openRename(dataset)}>
                                 <Pencil size={14} aria-hidden="true" />
                                 Rename
@@ -496,7 +442,7 @@ function Dashboard() {
                                 Delete Dataset
                               </button>
                             ) : null}
-                            {isAdmin && dataset.is_deleted ? (
+                            {canDelete && dataset.is_deleted ? (
                               <button
                                 type="button"
                                 role="menuitem"

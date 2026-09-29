@@ -1,112 +1,192 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { API_BASE, authConfig, clearSession, errorMessage, formatRole, isAdminRole, readUser } from "../lib/session";
-import "../components/grid/grid.css";
-import "../components/layout/shell.css";
+import { API_BASE, authConfig, clearSession, errorMessage, initials } from "../lib/session";
+import "./UsersPage.css";
+
+const ROLES = [
+  ["admin", "Admin"],
+  ["manager", "Manager"],
+  ["validator", "Validator"],
+  ["service", "Service"],
+];
 
 function UsersPage() {
   const navigate = useNavigate();
-  const admin = isAdminRole(readUser()?.role);
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(admin);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingId, setSavingId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", role: "service", password: "" });
+  const [resetFor, setResetFor] = useState(null);
+  const [resetPassword, setResetPassword] = useState("");
 
   useEffect(() => {
-    if (!admin) return undefined;
     let active = true;
-    async function load() {
-      try {
-        const { data } = await axios.get(`${API_BASE}/api/users`, authConfig());
+    axios
+      .get(`${API_BASE}/api/users`, authConfig())
+      .then(({ data }) => {
         if (!active) return;
         setUsers(data.users || []);
-      } catch (err) {
+      })
+      .catch((err) => {
         if (!active) return;
         if (err.response?.status === 401) {
           clearSession(navigate);
           return;
         }
         setError(errorMessage(err, "Unable to load users."));
-      } finally {
+      })
+      .finally(() => {
         if (active) setLoading(false);
-      }
-    }
-    load();
+      });
     return () => {
       active = false;
     };
-  }, [admin, navigate]);
+  }, [navigate]);
+
+  function patchUser(next) {
+    setUsers((current) => current.map((entry) => (entry.id === next.id ? next : entry)));
+  }
+
+  async function createUser(event) {
+    event.preventDefault();
+    setCreating(true);
+    setError("");
+    try {
+      const { data } = await axios.post(`${API_BASE}/api/users`, form, authConfig());
+      setUsers((current) => [...current, data.user].sort((left, right) => left.name.localeCompare(right.name)));
+      setForm({ name: "", email: "", role: "service", password: "" });
+    } catch (err) {
+      setError(errorMessage(err, "Unable to create this user."));
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function changeRole(person, role) {
     setSavingId(person.id);
     setError("");
     try {
       const { data } = await axios.patch(`${API_BASE}/api/users/${person.id}/role`, { role }, authConfig());
-      setUsers((current) => current.map((entry) => (entry.id === person.id ? { ...entry, ...data.user } : entry)));
-      const session = readUser();
-      if (session && Number(session.id) === Number(person.id)) {
-        localStorage.setItem("user", JSON.stringify({ ...session, role: data.user.role }));
-      }
+      patchUser(data.user);
     } catch (err) {
-      if (err.response?.status === 401) {
-        clearSession(navigate);
-        return;
-      }
       setError(errorMessage(err, "Unable to update this role."));
     } finally {
       setSavingId(null);
     }
   }
 
+  async function changeStatus(person) {
+    setSavingId(person.id);
+    setError("");
+    try {
+      const { data } = await axios.patch(
+        `${API_BASE}/api/users/${person.id}/status`,
+        { isActive: !person.isActive },
+        authConfig()
+      );
+      patchUser(data.user);
+    } catch (err) {
+      setError(errorMessage(err, "Unable to update this user."));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function submitReset(event) {
+    event.preventDefault();
+    setSavingId(resetFor.id);
+    setError("");
+    try {
+      await axios.post(`${API_BASE}/api/users/${resetFor.id}/reset-password`, { password: resetPassword }, authConfig());
+      setResetFor(null);
+      setResetPassword("");
+    } catch (err) {
+      setError(errorMessage(err, "Unable to reset this password."));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   return (
-    <div className="page-frame">
+    <div className="page-frame users-page">
       <div className="page-heading">
         <div>
-          <h1>Users & Permissions</h1>
-          <p>Assign workspace roles. Column view and edit access is set from a dataset’s Permissions button.</p>
+          <h1>Users</h1>
+          <p>Create accounts and assign one of the four workspace roles.</p>
         </div>
       </div>
-      {!admin ? (
-        <section className="users-card">
-          <p>Only an Admin can change user roles. Ask an Admin to open a dataset and use Permissions to set your column access.</p>
-        </section>
-      ) : null}
       {error ? <p className="sheet-banner is-error">{error}</p> : null}
-      {admin && loading ? <p>Loading users…</p> : null}
-      {admin && !loading ? (
+      <form className="user-create" onSubmit={createUser}>
+        <input placeholder="Name" aria-label="Name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
+        <input type="email" placeholder="Email" aria-label="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+        <select aria-label="Role" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+          {ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <input type="password" placeholder="Initial password" aria-label="Initial password" minLength={8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+        <button type="submit" disabled={creating}>{creating ? "Creating…" : "Create user"}</button>
+      </form>
+      {loading ? <p>Loading users…</p> : null}
+      {!loading ? (
         <section className="users-card">
-          <table className="perm-table">
+          <table className="user-table">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Status</th>
+                <th>Last login</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
+              {users.length === 0 ? (
+                <tr><td colSpan={6}>No users yet.</td></tr>
+              ) : null}
               {users.map((person) => (
                 <tr key={person.id}>
-                  <td>{person.name}</td>
+                  <td>
+                    <span className="user-name">
+                      <span className="avatar">{initials(person.name)}</span>
+                      {person.name}
+                    </span>
+                  </td>
                   <td>{person.email}</td>
                   <td>
                     <select
-                      value={formatRole(person.role)}
+                      className={`role-pill role-${person.role}`}
+                      value={person.role}
                       disabled={savingId === person.id}
                       aria-label={`Role for ${person.name}`}
                       onChange={(event) => changeRole(person, event.target.value)}
                     >
-                      <option value="Admin">Admin</option>
-                      <option value="Manager">Manager</option>
-                      <option value="Validator">Validator</option>
-                      <option value="Service">Service</option>
+                      {ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
+                  </td>
+                  <td>{person.isActive ? "Active" : "Inactive"}</td>
+                  <td>{person.lastLoginAt ? new Date(person.lastLoginAt).toLocaleString() : "—"}</td>
+                  <td className="user-actions">
+                    <button type="button" disabled={savingId === person.id} onClick={() => changeStatus(person)}>
+                      {person.isActive ? "Deactivate" : "Reactivate"}
+                    </button>
+                    <button type="button" onClick={() => { setResetFor(person); setResetPassword(""); }}>Reset password</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </section>
+      ) : null}
+      {resetFor ? (
+        <form className="user-create" onSubmit={submitReset}>
+          <strong>Reset password for {resetFor.name}</strong>
+          <input type="password" minLength={8} aria-label="New password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} required />
+          <button type="submit" disabled={savingId === resetFor.id}>Save password</button>
+          <button type="button" onClick={() => setResetFor(null)}>Cancel</button>
+        </form>
       ) : null}
     </div>
   );

@@ -1,49 +1,9 @@
+import axios from "axios";
+
 export const API_BASE = "http://localhost:5000";
 
-export function readUser() {
-  try {
-    return JSON.parse(localStorage.getItem("user") || "null");
-  } catch {
-    return null;
-  }
-}
-
-export function formatRole(role) {
-  if (!role) return "User";
-  const normalized = String(role).toLowerCase().replace(/[_-]+/g, " ").trim();
-  if (normalized === "admin") return "Admin";
-  if (normalized === "manager" || normalized === "managing person" || normalized === "managingperson") {
-    return "Manager";
-  }
-  if (normalized === "validator") return "Validator";
-  if (normalized === "service") return "Service";
-  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-export function isAdminRole(role) {
-  return formatRole(role) === "Admin";
-}
-
-export function canDeleteRole(role) {
-  const label = formatRole(role);
-  return label === "Admin" || label === "Manager";
-}
-
-export function roleBadgeClass(role) {
-  const label = formatRole(role);
-  if (label === "Admin") return "role-badge role-admin";
-  if (label === "Manager") return "role-badge role-manager";
-  if (label === "Validator") return "role-badge role-validator";
-  if (label === "Service") return "role-badge role-service";
-  return "role-badge";
-}
-
 export function authConfig() {
-  return {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
-    },
-  };
+  return { withCredentials: true };
 }
 
 export function errorMessage(error, fallback) {
@@ -63,9 +23,13 @@ export async function messageFromResponse(error, fallback) {
   return errorMessage(error, fallback);
 }
 
-export function clearSession(navigate) {
-  localStorage.clear();
-  navigate("/login");
+export async function clearSession(navigate) {
+  try {
+    await axios.post(`${API_BASE}/api/auth/logout`, {}, { withCredentials: true });
+  } catch {
+    /* The session cookie is already gone. */
+  }
+  if (navigate) navigate("/login");
 }
 
 export function initials(name) {

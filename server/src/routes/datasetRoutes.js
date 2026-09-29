@@ -1,6 +1,6 @@
 const express = require("express");
 const multer = require("multer");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth, requirePermission } = require("../middleware/auth");
 const {
   getDatasets,
   createDataset,
@@ -76,32 +76,32 @@ router.param("fieldId", rejectInvalidInteger("fieldId", "field id"));
 router.param("rowId", rejectInvalidInteger("rowId", "row id"));
 router.use(requireAuth);
 router.get("/", getDatasets);
-router.post("/import", sheetUpload, importSheet);
-router.post("/", createDataset);
+router.post("/import", requirePermission("canUpload"), sheetUpload, importSheet);
+router.post("/", requirePermission("canUpload"), createDataset);
 router.get("/:id/records", getRecords);
-router.post("/:id/records", createRecord);
-router.delete("/:id/records/:recordId", deleteRecord);
+router.post("/:id/records", requirePermission("canAddRow"), createRecord);
+router.delete("/:id/records/:recordId", requirePermission("canDeleteRow"), deleteRecord);
 router.patch("/:id/records/:recordId/workflow/validate", validateRecord);
-router.patch("/:id/records/:recordId/workflow/verify", verifyRecord);
+router.patch("/:id/records/:recordId/workflow/verify", requirePermission("canVerify"), verifyRecord);
 router.patch("/:id/records/:recordId/workflow/proposal", updateProposal);
 router.patch("/:id/records/:recordId/cells", updateCell);
 router.get("/:id/audit-logs", getAuditLogs);
-router.get("/:id/permissions", requireRole(["Admin"]), getFieldPermissions);
-router.put("/:id/permissions", requireRole(["Admin"]), saveFieldPermissions);
-router.post("/:id/preview-excel", excelUpload, previewExcel);
-router.post("/:id/import-excel", excelUpload, importExcel);
+router.get("/:id/permissions", requirePermission("canEditSchema"), getFieldPermissions);
+router.put("/:id/permissions", requirePermission("canEditSchema"), saveFieldPermissions);
+router.post("/:id/preview-excel", requirePermission("canUpload"), excelUpload, previewExcel);
+router.post("/:id/import-excel", requirePermission("canUpload"), excelUpload, importExcel);
 router.get("/:id/export-excel", exportExcel);
 router.get("/:id/export", exportSheet);
 router.get("/:id/rows", getRows);
-router.post("/:id/rows", createSheetRow);
+router.post("/:id/rows", requirePermission("canAddRow"), createSheetRow);
 router.patch("/:id/rows/:rowId", patchSheetRow);
-router.delete("/:id/rows/:rowId", deleteSheetRow);
-router.patch("/:id/columns/:key", renameColumn);
-router.patch("/:id/restore", requireRole(["Admin"]), restoreDataset);
-router.patch("/:id", updateDataset);
-router.delete("/:id", requireRole(["Admin", "Manager"]), softDeleteDataset);
+router.delete("/:id/rows/:rowId", requirePermission("canDeleteRow"), deleteSheetRow);
+router.patch("/:id/columns/:key", requirePermission("canEditSchema"), renameColumn);
+router.patch("/:id/restore", requirePermission("canDeleteDataset"), restoreDataset);
+router.patch("/:id", requirePermission("canUpload"), updateDataset);
+router.delete("/:id", requirePermission("canDeleteDataset"), softDeleteDataset);
 router.get("/:id", getSheet);
-router.post("/:id/fields", requireRole(["Admin"]), addField);
-router.delete("/:id/fields/:fieldId", requireRole(["Admin"]), deleteField);
+router.post("/:id/fields", requirePermission("canEditSchema"), addField);
+router.delete("/:id/fields/:fieldId", requirePermission("canEditSchema"), deleteField);
 
 module.exports = router;

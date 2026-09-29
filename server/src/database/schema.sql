@@ -24,6 +24,7 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     role_id INTEGER NOT NULL REFERENCES roles(id),
     is_active BOOLEAN DEFAULT TRUE,
+    last_login_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
