@@ -83,6 +83,8 @@
 .sheet-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
   margin-top: 16px;
 }
@@ -320,6 +322,71 @@
   outline: 2px solid #0e6e62;
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+.import-modal {
+  width: min(760px, 100%);
+  max-height: min(86svh, 860px);
+  overflow: auto;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 22px 16px;
+  border: 1px dashed #d7cebf;
+  border-radius: 14px;
+  background: #faf7f1;
+  color: #3d4d61;
+  text-align: center;
+}
+
+.dropzone p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.dropzone-active {
+  border-color: #0e6e62;
+  background: #e5f4f1;
+}
+
+.import-summary {
+  margin-top: 16px;
+}
+
+.import-summary > p {
+  margin: 0 0 8px;
+  color: #243246;
+  font-size: 14px;
+}
+
+.import-warning {
+  color: #8a5a12;
+}
+
+.import-ok {
+  color: #0a534a;
+}
+
+.import-table-wrap {
+  margin: 12px 0;
+}
+
+.import-check {
+  margin-top: 4px;
+}
+
+.import-modal .page-error,
+.import-modal .page-message {
+  margin: 14px 0 0;
+}
+
+.import-modal .modal-actions {
+  margin-top: 18px;
 }
 
 @media (max-width: 760px) {

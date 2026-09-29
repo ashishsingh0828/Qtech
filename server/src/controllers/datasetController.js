@@ -707,4 +707,6 @@ module.exports = {
   deleteRecord,
   updateCell,
   getAuditLogs,
+  normalizeFieldKey,
+  normalizeCellValue,
 };

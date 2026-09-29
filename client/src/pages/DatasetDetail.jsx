@@ -8,9 +8,12 @@ import {
   LogOut,
   Pencil,
   Plus,
+  Download,
+  FileSpreadsheet,
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import "./Dashboard.css";
@@ -58,6 +61,29 @@ function authConfig() {
 
 function errorMessage(error, fallback) {
   return error.response?.data?.error || error.response?.data?.message || fallback;
+}
+
+async function messageFromResponse(error, fallback) {
+  const data = error.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text());
+      return parsed.error || parsed.message || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return errorMessage(error, fallback);
+}
+
+function isExcelFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  return name.endsWith(".xlsx") || name.endsWith(".xls");
+}
+
+function downloadName(datasetName) {
+  const cleaned = String(datasetName || "dataset").replace(/[^\w.\- ]+/g, "").trim();
+  return `${cleaned || "dataset"}.xlsx`;
 }
 
 function inputTypeFor(fieldType) {
@@ -283,6 +309,17 @@ function DatasetDetail() {
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [createMissing, setCreateMissing] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -327,19 +364,20 @@ function DatasetDetail() {
   }, [id, navigate, refreshKey]);
 
   useEffect(() => {
-    const dialogOpen = modalOpen || rowModalOpen || deleteTarget;
+    const dialogOpen = modalOpen || rowModalOpen || deleteTarget || importOpen;
     if (!dialogOpen) return undefined;
 
     function onKeyDown(event) {
-      if (event.key !== "Escape" || submitting || rowSubmitting || deleting) return;
+      if (event.key !== "Escape" || submitting || rowSubmitting || deleting || importing) return;
       setModalOpen(false);
       setRowModalOpen(false);
       setDeleteTarget(null);
+      setImportOpen(false);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, rowModalOpen, deleteTarget, submitting, rowSubmitting, deleting]);
+  }, [modalOpen, rowModalOpen, deleteTarget, importOpen, submitting, rowSubmitting, deleting, importing]);
 
   function handleLogout() {
     localStorage.clear();
@@ -349,6 +387,106 @@ function DatasetDetail() {
   function leaveForLogin() {
     localStorage.clear();
     navigate("/login");
+  }
+
+  function openImport() {
+    setImportFile(null);
+    setPreview(null);
+    setPreviewError("");
+    setImportError("");
+    setCreateMissing(true);
+    setDragOver(false);
+    setImportOpen(true);
+  }
+
+  async function previewWorkbook(file) {
+    if (!isExcelFile(file)) {
+      setPreview(null);
+      setImportFile(null);
+      setPreviewError("Choose an .xlsx or .xls file.");
+      return;
+    }
+
+    setImportFile(file);
+    setPreview(null);
+    setPreviewError("");
+    setImportError("");
+    setPreviewLoading(true);
+
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+      const { data } = await axios.post(
+        `${API_BASE}/api/datasets/${id}/preview-excel`,
+        form,
+        authConfig()
+      );
+      setPreview(data);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        leaveForLogin();
+        return;
+      }
+      setPreviewError(await messageFromResponse(err, "Unable to preview this spreadsheet."));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    setRecordsError("");
+
+    try {
+      const response = await axios.get(`${API_BASE}/api/datasets/${id}/export-excel`, {
+        ...authConfig(),
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = downloadName(dataset?.name);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        leaveForLogin();
+        return;
+      }
+      setRecordsError(await messageFromResponse(err, "Unable to export this dataset."));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!importFile) return;
+    setImporting(true);
+    setImportError("");
+
+    const form = new FormData();
+    form.append("file", importFile);
+    form.append("createMissing", createMissing ? "true" : "false");
+
+    try {
+      await axios.post(`${API_BASE}/api/datasets/${id}/import-excel`, form, authConfig());
+      setImportOpen(false);
+      setRefreshKey((value) => value + 1);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        leaveForLogin();
+        return;
+      }
+      setImportError(await messageFromResponse(err, "Unable to import this spreadsheet."));
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function loadLogs() {
@@ -645,6 +783,19 @@ function DatasetDetail() {
                     />
                   </label>
                   <button
+                    className="logout-button"
+                    type="button"
+                    onClick={handleExport}
+                    disabled={exporting}
+                  >
+                    <Download size={16} strokeWidth={2} aria-hidden="true" />
+                    {exporting ? "Exporting…" : "Export to Excel"}
+                  </button>
+                  <button className="logout-button" type="button" onClick={openImport}>
+                    <Upload size={16} strokeWidth={2} aria-hidden="true" />
+                    Import Excel
+                  </button>
+                  <button
                     className="upload-button"
                     type="button"
                     onClick={openRowModal}
@@ -795,6 +946,188 @@ function DatasetDetail() {
           ) : null}
         </section>
       </main>
+
+      {importOpen ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!importing && !previewLoading) setImportOpen(false);
+          }}
+        >
+          <div
+            className="modal import-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-excel-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <h2 id="import-excel-title">Import Excel</h2>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close"
+                onClick={() => setImportOpen(false)}
+                disabled={importing || previewLoading}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              className={dragOver ? "dropzone dropzone-active" : "dropzone"}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                const file = event.dataTransfer.files?.[0];
+                if (file) previewWorkbook(file);
+              }}
+            >
+              <FileSpreadsheet size={28} aria-hidden="true" />
+              <p>{importFile ? importFile.name : "Drop an .xlsx or .xls file here"}</p>
+              <button
+                className="logout-button"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={previewLoading || importing}
+              >
+                Choose file
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) previewWorkbook(file);
+                  event.target.value = "";
+                }}
+              />
+            </div>
+
+            {previewError ? (
+              <p className="page-error" role="alert">
+                {previewError}
+              </p>
+            ) : null}
+            {importError ? (
+              <p className="page-error" role="alert">
+                {importError}
+              </p>
+            ) : null}
+            {previewLoading ? <p className="page-message">Reading spreadsheet…</p> : null}
+
+            {preview ? (
+              <div className="import-summary">
+                <p>
+                  {preview.totalRows} detected {preview.totalRows === 1 ? "row" : "rows"} ·{" "}
+                  {preview.headers.length} detected{" "}
+                  {preview.headers.length === 1 ? "column" : "columns"}
+                </p>
+                {preview.unmatchedHeaders.length ? (
+                  <p className="import-warning" role="status">
+                    {createMissing
+                      ? `${preview.unmatchedHeaders.length} unmatched ${
+                          preview.unmatchedHeaders.length === 1 ? "column" : "columns"
+                        } will be created: ${preview.unmatchedHeaders.join(", ")}`
+                      : `${preview.unmatchedHeaders.length} unmatched ${
+                          preview.unmatchedHeaders.length === 1 ? "column" : "columns"
+                        } will be skipped: ${preview.unmatchedHeaders.join(", ")}`}
+                  </p>
+                ) : (
+                  <p className="import-ok">Every detected column matches this dataset.</p>
+                )}
+
+                <div className="dataset-table-wrap import-table-wrap">
+                  <table className="dataset-table">
+                    <thead>
+                      <tr>
+                        <th>Excel column</th>
+                        <th>Dataset field</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.headers.map((header) => {
+                        const match = preview.matchedFields.find((field) => field.header === header);
+                        return (
+                          <tr key={header}>
+                            <td>{header}</td>
+                            <td>{match ? match.name : "—"}</td>
+                            <td>
+                              {match ? "Matched" : createMissing ? "Will create" : "Unmatched"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {preview.preview.length ? (
+                  <div className="dataset-table-wrap import-table-wrap">
+                    <table className="dataset-table">
+                      <thead>
+                        <tr>
+                          {preview.headers.map((header) => (
+                            <th key={header}>{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.preview.map((row, index) => (
+                          <tr key={`${importFile?.name || "row"}-${index}`}>
+                            {preview.headers.map((header) => (
+                              <td key={header}>{row[header] || "—"}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="page-message">No data rows were detected below the header.</p>
+                )}
+
+                <label className="check-row import-check">
+                  <input
+                    type="checkbox"
+                    checked={createMissing}
+                    onChange={(event) => setCreateMissing(event.target.checked)}
+                    disabled={importing}
+                  />
+                  Create columns for unmatched headers
+                </label>
+              </div>
+            ) : null}
+
+            <div className="modal-actions">
+              <button
+                className="logout-button"
+                type="button"
+                onClick={() => setImportOpen(false)}
+                disabled={importing}
+              >
+                Cancel
+              </button>
+              <button
+                className="upload-button"
+                type="button"
+                onClick={handleImport}
+                disabled={!preview || previewLoading || importing || preview.totalRows === 0}
+              >
+                {importing ? "Importing…" : "Confirm & Import"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div
