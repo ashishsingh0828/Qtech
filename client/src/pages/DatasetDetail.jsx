@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { ArrowLeft, Database, LogOut, Plus, X } from "lucide-react";
+import { ArrowLeft, Database, LogOut, Plus, Search, Trash2, X } from "lucide-react";
 import "./Dashboard.css";
 import "./DatasetDetail.css";
 
@@ -49,6 +49,29 @@ function errorMessage(error, fallback) {
   return error.response?.data?.error || error.response?.data?.message || fallback;
 }
 
+function inputTypeFor(fieldType) {
+  if (fieldType === "number") return "number";
+  if (fieldType === "date") return "date";
+  if (fieldType === "email") return "email";
+  return "text";
+}
+
+function emptyRowValues(fields) {
+  const values = {};
+  for (const field of fields) {
+    values[field.field_key] = field.field_type === "boolean" ? false : "";
+  }
+  return values;
+}
+
+function cellText(field, value) {
+  if (value == null || value === "") return "";
+  if (field.field_type === "boolean") {
+    return value === true || value === "true" ? "Yes" : "No";
+  }
+  return String(value);
+}
+
 function DatasetDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -62,9 +85,13 @@ function DatasetDetail() {
         : "role-badge";
 
   const [dataset, setDataset] = useState(null);
+  const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [recordsLoading, setRecordsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [recordsError, setRecordsError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [query, setQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [fieldName, setFieldName] = useState("");
   const [fieldKey, setFieldKey] = useState("");
@@ -73,17 +100,30 @@ function DatasetDetail() {
   const [isRequired, setIsRequired] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [rowModalOpen, setRowModalOpen] = useState(false);
+  const [rowValues, setRowValues] = useState({});
+  const [rowError, setRowError] = useState("");
+  const [rowSubmitting, setRowSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     async function loadDataset() {
       setLoading(true);
+      setRecordsLoading(true);
       setError("");
+      setRecordsError("");
 
       try {
-        const { data } = await axios.get(`${API_BASE}/api/datasets/${id}`, authConfig());
-        if (active) setDataset(data.dataset);
+        const [datasetResponse, recordsResponse] = await Promise.all([
+          axios.get(`${API_BASE}/api/datasets/${id}`, authConfig()),
+          axios.get(`${API_BASE}/api/datasets/${id}/records`, authConfig()),
+        ]);
+        if (!active) return;
+        setDataset(datasetResponse.data.dataset);
+        setRecords(recordsResponse.data.records || []);
       } catch (err) {
         if (!active) return;
         if (err.response?.status === 401) {
@@ -92,9 +132,13 @@ function DatasetDetail() {
           return;
         }
         setDataset(null);
+        setRecords([]);
         setError(errorMessage(err, "Unable to load this dataset."));
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setRecordsLoading(false);
+        }
       }
     }
 
@@ -106,17 +150,19 @@ function DatasetDetail() {
   }, [id, navigate, refreshKey]);
 
   useEffect(() => {
-    if (!modalOpen) return undefined;
+    const dialogOpen = modalOpen || rowModalOpen || deleteTarget;
+    if (!dialogOpen) return undefined;
 
     function onKeyDown(event) {
-      if (event.key === "Escape" && !submitting) {
-        setModalOpen(false);
-      }
+      if (event.key !== "Escape" || submitting || rowSubmitting || deleting) return;
+      setModalOpen(false);
+      setRowModalOpen(false);
+      setDeleteTarget(null);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, submitting]);
+  }, [modalOpen, rowModalOpen, deleteTarget, submitting, rowSubmitting, deleting]);
 
   function handleLogout() {
     localStorage.clear();
@@ -170,7 +216,99 @@ function DatasetDetail() {
     }
   }
 
+  async function reloadRecords() {
+    setRecordsLoading(true);
+    setRecordsError("");
+    try {
+      const { data } = await axios.get(`${API_BASE}/api/datasets/${id}/records`, authConfig());
+      setRecords(data.records || []);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        localStorage.clear();
+        navigate("/login");
+        return;
+      }
+      setRecordsError(errorMessage(err, "Unable to load rows."));
+    } finally {
+      setRecordsLoading(false);
+    }
+  }
+
+  function openRowModal() {
+    setRowValues(emptyRowValues(fields));
+    setRowError("");
+    setRowModalOpen(true);
+  }
+
+  function updateRowValue(fieldKeyName, value) {
+    setRowValues((current) => ({
+      ...current,
+      [fieldKeyName]: value,
+    }));
+  }
+
+  async function handleAddRow(event) {
+    event.preventDefault();
+    setRowError("");
+    setRowSubmitting(true);
+
+    const values = {};
+    for (const field of fields) {
+      values[field.field_key] = rowValues[field.field_key];
+    }
+
+    try {
+      await axios.post(`${API_BASE}/api/datasets/${id}/records`, { values }, authConfig());
+      setRowModalOpen(false);
+      setRowValues({});
+      await reloadRecords();
+    } catch (err) {
+      if (err.response?.status === 401) {
+        localStorage.clear();
+        navigate("/login");
+        return;
+      }
+      setRowError(errorMessage(err, "Unable to add this row."));
+    } finally {
+      setRowSubmitting(false);
+    }
+  }
+
+  async function handleDeleteRow() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setRecordsError("");
+
+    try {
+      await axios.delete(
+        `${API_BASE}/api/datasets/${id}/records/${deleteTarget.id}`,
+        authConfig()
+      );
+      setDeleteTarget(null);
+      await reloadRecords();
+    } catch (err) {
+      if (err.response?.status === 401) {
+        localStorage.clear();
+        navigate("/login");
+        return;
+      }
+      setRecordsError(errorMessage(err, "Unable to delete this row."));
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const fields = dataset?.fields || [];
+  const needle = query.trim().toLowerCase();
+  const filteredRecords = records.filter((record) => {
+    if (!needle) return true;
+    return fields.some((field) => {
+      const raw = record.values?.[field.field_key];
+      const displayed = cellText(field, raw).toLowerCase();
+      return displayed.includes(needle) || String(raw ?? "").toLowerCase().includes(needle);
+    });
+  });
 
   return (
     <div className="dashboard">
@@ -195,7 +333,7 @@ function DatasetDetail() {
       </header>
 
       <main className="dashboard-main">
-        <section className="dataset-card">
+        <section className="dataset-card detail-card">
           <div className="dataset-card-head">
             <div>
               <button className="back-link" type="button" onClick={() => navigate("/dashboard")}>
@@ -253,6 +391,99 @@ function DatasetDetail() {
                   </table>
                 </div>
               )}
+            </div>
+          ) : null}
+
+          {dataset ? (
+            <div className="sheet-section">
+              <div className="sheet-toolbar">
+                <div>
+                  <h2>Spreadsheet</h2>
+                  <p className="sheet-count">
+                    {needle
+                      ? `${filteredRecords.length} of ${records.length} rows`
+                      : `${records.length} ${records.length === 1 ? "row" : "rows"}`}
+                  </p>
+                </div>
+                <div className="sheet-tools">
+                  <label className="sheet-search">
+                    <Search size={16} aria-hidden="true" />
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search rows"
+                      aria-label="Search rows"
+                    />
+                  </label>
+                  <button
+                    className="upload-button"
+                    type="button"
+                    onClick={openRowModal}
+                    disabled={fields.length === 0}
+                  >
+                    <Plus size={18} strokeWidth={2} aria-hidden="true" />
+                    Add Row
+                  </button>
+                </div>
+              </div>
+
+              {recordsError ? (
+                <p className="page-error" role="alert">
+                  {recordsError}
+                </p>
+              ) : null}
+
+              {fields.length === 0 ? (
+                <p className="page-message">Add a column before entering rows.</p>
+              ) : null}
+
+              {fields.length > 0 && recordsLoading ? (
+                <p className="page-message">Loading rows…</p>
+              ) : null}
+
+              {fields.length > 0 && !recordsLoading && filteredRecords.length === 0 ? (
+                <p className="page-message">
+                  {records.length === 0 ? "No rows yet." : "No rows match your search."}
+                </p>
+              ) : null}
+
+              {fields.length > 0 && !recordsLoading && filteredRecords.length > 0 ? (
+                <div className="dataset-table-wrap sheet-table-wrap">
+                  <table className="dataset-table sheet-table">
+                    <thead>
+                      <tr>
+                        {fields.map((field) => (
+                          <th key={field.id}>
+                            {field.name}
+                            {field.is_required ? <span className="required-mark">*</span> : null}
+                          </th>
+                        ))}
+                        <th className="actions-col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRecords.map((record) => (
+                        <tr key={record.id}>
+                          {fields.map((field) => (
+                            <td key={field.id}>{cellText(field, record.values?.[field.field_key])}</td>
+                          ))}
+                          <td className="actions-col">
+                            <button
+                              className="delete-row"
+                              type="button"
+                              onClick={() => setDeleteTarget(record)}
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -352,6 +583,116 @@ function DatasetDetail() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {rowModalOpen ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!rowSubmitting) setRowModalOpen(false);
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-row-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <h2 id="add-row-title">Add Row</h2>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close"
+                onClick={() => setRowModalOpen(false)}
+                disabled={rowSubmitting}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form className="modal-form" onSubmit={handleAddRow}>
+              {rowError ? (
+                <p className="page-error" role="alert">
+                  {rowError}
+                </p>
+              ) : null}
+
+              {fields.map((field, index) => (
+                <label key={field.id} className={field.field_type === "boolean" ? "check-row" : undefined}>
+                  {field.field_type === "boolean" ? (
+                    <input
+                      type="checkbox"
+                      checked={Boolean(rowValues[field.field_key])}
+                      onChange={(event) => updateRowValue(field.field_key, event.target.checked)}
+                    />
+                  ) : null}
+                  <span>
+                    {field.name}
+                    {field.is_required ? " *" : ""}
+                  </span>
+                  {field.field_type === "boolean" ? null : (
+                    <input
+                      type={inputTypeFor(field.field_type)}
+                      value={rowValues[field.field_key] ?? ""}
+                      onChange={(event) => updateRowValue(field.field_key, event.target.value)}
+                      required={field.is_required}
+                      autoFocus={index === 0}
+                    />
+                  )}
+                </label>
+              ))}
+
+              <div className="modal-actions">
+                <button
+                  className="logout-button"
+                  type="button"
+                  onClick={() => setRowModalOpen(false)}
+                  disabled={rowSubmitting}
+                >
+                  Cancel
+                </button>
+                <button className="upload-button" type="submit" disabled={rowSubmitting}>
+                  {rowSubmitting ? "Saving…" : "Add Row"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!deleting) setDeleteTarget(null);
+          }}
+        >
+          <div
+            className="modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-row-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="delete-row-title">Delete this row?</h2>
+            <p className="confirm-copy">The row and its cell values will be removed.</p>
+            <div className="modal-actions">
+              <button
+                className="logout-button"
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button className="delete-row" type="button" onClick={handleDeleteRow} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete row"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -237,9 +237,277 @@ const addField = async (req, res) => {
   }
 };
 
+function normalizeCellValue(field, raw) {
+  if (field.field_type === "boolean") {
+    if (raw === true || raw === "true" || raw === "Yes" || raw === "yes") return "true";
+    if (
+      raw === false ||
+      raw === "false" ||
+      raw === "No" ||
+      raw === "no" ||
+      raw == null ||
+      raw === ""
+    ) {
+      return "false";
+    }
+    return null;
+  }
+
+  if (raw == null) return "";
+
+  const value = String(raw).trim();
+  if (value === "") return "";
+
+  if (field.field_type === "number") {
+    if (!Number.isFinite(Number(value))) return null;
+    return value;
+  }
+
+  if (field.field_type === "date") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsed = new Date(`${value}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return value;
+  }
+
+  if (field.field_type === "email") {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return null;
+    return value;
+  }
+
+  return value;
+}
+
+const getRecords = async (req, res) => {
+  const datasetId = Number(req.params.id);
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  try {
+    const datasetResult = await pool.query(
+      "SELECT id FROM datasets WHERE id = $1 AND is_deleted = FALSE",
+      [datasetId]
+    );
+
+    if (datasetResult.rows.length === 0) {
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    const recordsResult = await pool.query(
+      `
+      SELECT id, created_at
+      FROM records
+      WHERE dataset_id = $1 AND is_deleted = FALSE
+      ORDER BY created_at ASC, id ASC
+      `,
+      [datasetId]
+    );
+
+    const valuesResult = await pool.query(
+      `
+      SELECT rv.record_id, f.field_key, rv.value
+      FROM record_values rv
+      JOIN records r ON r.id = rv.record_id
+      JOIN fields f ON f.id = rv.field_id
+      WHERE r.dataset_id = $1
+        AND r.is_deleted = FALSE
+        AND f.dataset_id = $1
+        AND f.is_deleted = FALSE
+      `,
+      [datasetId]
+    );
+
+    const valuesByRecord = new Map();
+
+    for (const row of valuesResult.rows) {
+      if (!valuesByRecord.has(row.record_id)) {
+        valuesByRecord.set(row.record_id, {});
+      }
+      valuesByRecord.get(row.record_id)[row.field_key] = row.value;
+    }
+
+    res.json({
+      records: recordsResult.rows.map((record) => ({
+        id: record.id,
+        created_at: record.created_at,
+        values: valuesByRecord.get(record.id) || {},
+      })),
+    });
+  } catch (error) {
+    console.error("Get records error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const createRecord = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const createdBy = Number(req.user?.id);
+  const rawValues = req.body?.values;
+
+  if (!Number.isInteger(datasetId) || datasetId <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  if (!Number.isInteger(createdBy) || createdBy <= 0) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  if (!rawValues || typeof rawValues !== "object" || Array.isArray(rawValues)) {
+    return res.status(400).json({ error: "values object is required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const datasetResult = await client.query(
+      "SELECT id FROM datasets WHERE id = $1 AND is_deleted = FALSE",
+      [datasetId]
+    );
+
+    if (datasetResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    const fieldsResult = await client.query(
+      `
+      SELECT id, name, field_key, field_type, is_required
+      FROM fields
+      WHERE dataset_id = $1 AND is_deleted = FALSE
+      ORDER BY position ASC, id ASC
+      `,
+      [datasetId]
+    );
+
+    if (fieldsResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Add columns before creating rows" });
+    }
+
+    const entries = [];
+
+    for (const field of fieldsResult.rows) {
+      const hasKey = Object.prototype.hasOwnProperty.call(rawValues, field.field_key);
+      const normalized = normalizeCellValue(field, hasKey ? rawValues[field.field_key] : "");
+
+      if (normalized == null) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `${field.name} has an invalid value` });
+      }
+
+      if (field.is_required && field.field_type !== "boolean" && normalized === "") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `${field.name} is required` });
+      }
+
+      if (field.field_type === "boolean") {
+        if (hasKey || field.is_required) {
+          entries.push({ field, value: normalized || "false" });
+        }
+      } else if (normalized !== "") {
+        entries.push({ field, value: normalized });
+      }
+    }
+
+    const insertRecord = await client.query(
+      `
+      INSERT INTO records (dataset_id, created_by, updated_by)
+      VALUES ($1, $2, $2)
+      RETURNING id, created_at
+      `,
+      [datasetId, createdBy]
+    );
+
+    const record = insertRecord.rows[0];
+    const values = {};
+
+    for (const entry of entries) {
+      await client.query(
+        `
+        INSERT INTO record_values (record_id, field_id, value, updated_by)
+        VALUES ($1, $2, $3, $4)
+        `,
+        [record.id, entry.field.id, entry.value, createdBy]
+      );
+      values[entry.field.field_key] = entry.value;
+    }
+
+    await client.query(
+      `
+      UPDATE datasets
+      SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+      WHERE id = $1
+      `,
+      [datasetId, createdBy]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      record: {
+        id: record.id,
+        created_at: record.created_at,
+        values,
+      },
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback error:", rollbackError);
+    }
+
+    if (error.code === "23503") {
+      return res.status(400).json({ error: "Unable to save this row" });
+    }
+
+    console.error("Create record error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    client.release();
+  }
+};
+
+const deleteRecord = async (req, res) => {
+  const datasetId = Number(req.params.id);
+  const recordId = Number(req.params.recordId);
+
+  if (
+    !Number.isInteger(datasetId) ||
+    datasetId <= 0 ||
+    !Number.isInteger(recordId) ||
+    recordId <= 0
+  ) {
+    return res.status(400).json({ error: "Invalid record id" });
+  }
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM records WHERE id = $1 AND dataset_id = $2 RETURNING id",
+      [recordId, datasetId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    res.json({ message: "Record deleted" });
+  } catch (error) {
+    console.error("Delete record error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 module.exports = {
   getDatasets,
   createDataset,
   getDataset,
   addField,
+  getRecords,
+  createRecord,
+  deleteRecord,
 };

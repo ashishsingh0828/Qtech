@@ -48,3 +48,161 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+.detail-card {
+  max-width: 1120px;
+}
+
+.sheet-section {
+  border-top: 1px solid #e6dfd2;
+  padding-bottom: 8px;
+}
+
+.sheet-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 28px 0;
+}
+
+.sheet-section h2 {
+  margin: 18px 0 0;
+  color: #102033;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sheet-count {
+  margin: 6px 0 0;
+  color: #5d6b7c;
+  font-size: 14px;
+}
+
+.sheet-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sheet-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #ddd4c6;
+  border-radius: 10px;
+  background: #fff;
+  color: #6d7b8c;
+}
+
+.sheet-search:focus-within {
+  border-color: #0e6e62;
+  box-shadow: 0 0 0 4px rgba(14, 110, 98, 0.12);
+}
+
+.sheet-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #102033;
+  font: inherit;
+  font-size: 14px;
+}
+
+.sheet-table-wrap {
+  margin-top: 16px;
+}
+
+.sheet-table th,
+.sheet-table td {
+  white-space: nowrap;
+}
+
+.sheet-table thead th {
+  background: #faf7f1;
+}
+
+.sheet-table td {
+  min-width: 120px;
+}
+
+.actions-col {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  background: #fffdf9;
+  box-shadow: -8px 0 12px rgba(16, 32, 51, 0.03);
+}
+
+.sheet-table thead .actions-col {
+  background: #faf7f1;
+}
+
+.required-mark {
+  margin-left: 4px;
+  color: #8d3326;
+}
+
+.delete-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #f0c4bb;
+  border-radius: 8px;
+  background: #fdf1ee;
+  color: #8d3326;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.delete-row:hover:not(:disabled) {
+  background: #f8e4df;
+}
+
+.delete-row:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.confirm-modal h2 {
+  margin-bottom: 8px;
+}
+
+.confirm-copy {
+  margin: 0;
+  color: #5d6b7c;
+  font-size: 15px;
+}
+
+.confirm-modal .modal-actions {
+  margin-top: 20px;
+}
+
+.delete-row:focus-visible,
+.sheet-search:focus-within {
+  outline: none;
+}
+
+@media (max-width: 760px) {
+  .sheet-toolbar,
+  .sheet-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sheet-search,
+  .sheet-tools .upload-button {
+    width: 100%;
+  }
+}
