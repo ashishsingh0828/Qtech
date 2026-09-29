@@ -1,9 +1,9 @@
 :root {
-  font-family: "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+  font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
   line-height: 1.45;
   font-weight: 450;
-  color: #102033;
-  background: #f4f1ea;
+  color: #0f172a;
+  background: #f8fafc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -43,8 +43,8 @@ p {
   padding: 32px 20px;
   text-align: center;
   background:
-    radial-gradient(circle at top left, rgba(196, 161, 90, 0.18), transparent 32%),
-    #f4f1ea;
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.16), transparent 32%),
+    #f8fafc;
 }
 
 .not-found-kicker {
@@ -53,19 +53,19 @@ p {
   text-transform: uppercase;
   font-size: 12px;
   font-weight: 700;
-  color: #8a5a12;
+  color: #b45309;
 }
 
 .not-found h1 {
   margin: 0;
   font-size: 40px;
   letter-spacing: -0.04em;
-  color: #102033;
+  color: #0f172a;
 }
 
 .not-found p {
   margin: 0;
-  color: #5d6b7c;
+  color: #64748b;
 }
 
 .not-found button {
@@ -74,8 +74,8 @@ p {
   padding: 0 16px;
   border: 0;
   border-radius: 12px;
-  background: #0e6e62;
-  color: #fffdf9;
+  background: #3730a3;
+  color: #ffffff;
   font: inherit;
   font-size: 15px;
   font-weight: 700;
@@ -83,5 +83,5 @@ p {
 }
 
 .not-found button:hover {
-  background: #0a534a;
+  background: #312e81;
 }

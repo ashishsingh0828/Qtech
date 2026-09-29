@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   Database,
-  LogOut,
-  Pencil,
-  Plus,
   Download,
   FileSpreadsheet,
+  Filter,
+  LogOut,
+  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -143,93 +146,117 @@ function draftsMatch(field, value, draft) {
   return draftFromValue(field, value) === String(draft ?? "");
 }
 
-function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthorized }) {
-  const { notify } = useToast();
-  const [editing, setEditing] = useState(false);
+function statusTone(value) {
+  const key = String(value ?? "").trim().toLowerCase();
+  if (key === "active" || key === "expired" || key === "pending" || key === "completed" || key === "validated") {
+    return key;
+  }
+  return "";
+}
+
+function typeLabel(fieldType) {
+  if (fieldType === "number") return "Number";
+  if (fieldType === "date") return "Date";
+  if (fieldType === "boolean") return "Boolean";
+  if (fieldType === "email") return "Email";
+  return "Text";
+}
+
+function compareCell(field, left, right) {
+  const leftRaw = left.values?.[field.field_key];
+  const rightRaw = right.values?.[field.field_key];
+  const leftEmpty = leftRaw == null || leftRaw === "";
+  const rightEmpty = rightRaw == null || rightRaw === "";
+  if (leftEmpty && rightEmpty) return 0;
+  if (leftEmpty) return 1;
+  if (rightEmpty) return -1;
+
+  if (field.field_type === "number") {
+    const leftNumber = Number(leftRaw);
+    const rightNumber = Number(rightRaw);
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      return leftNumber - rightNumber;
+    }
+  }
+
+  return cellText(field, leftRaw).localeCompare(cellText(field, rightRaw), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function EditableCell({ field, value, isEditing, pulse, errorText, onBegin, onCommit, onCancel }) {
   const [draft, setDraft] = useState("");
-  const [status, setStatus] = useState("");
-  const [statusText, setStatusText] = useState("");
-  const skipCommit = useRef(false);
+  const [saving, setSaving] = useState(false);
   const inputRef = useRef(null);
+  const skipBlur = useRef(false);
 
   useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus();
-      if (typeof inputRef.current.select === "function" && field.field_type !== "date") {
-        inputRef.current.select();
-      }
-    }
-  }, [editing, field.field_type]);
-
-  function beginEdit() {
-    skipCommit.current = false;
+    if (!isEditing) return undefined;
+    skipBlur.current = false;
     setDraft(draftFromValue(field, value));
-    setStatus("");
-    setStatusText("");
-    setEditing(true);
-  }
-
-  function cancelEdit() {
-    skipCommit.current = true;
-    setEditing(false);
-  }
-
-  async function commitEdit() {
-    if (skipCommit.current) {
-      skipCommit.current = false;
-      return;
-    }
-
-    setEditing(false);
-
-    if (draftsMatch(field, value, draft)) {
-      return;
-    }
-
-    const nextValue =
-      field.field_type === "boolean" ? (draft === "" ? "" : draft === "true") : draft;
-    setStatus("saving");
-    setStatusText("Saving…");
-
-    try {
-      const { data } = await axios.patch(
-        `${API_BASE}/api/datasets/${datasetId}/records/${recordId}/cells`,
-        { field_id: field.id, value: nextValue },
-        authConfig()
-      );
-      onSaved(recordId, field.field_key, data.updated?.value ?? nextValue);
-      setStatus("saved");
-      setStatusText("Saved");
-      notify("Cell saved");
-      window.setTimeout(() => {
-        setStatus((current) => (current === "saved" ? "" : current));
-      }, 1200);
-    } catch (err) {
-      if (err.response?.status === 401) {
-        onUnauthorized();
-        return;
+    setSaving(false);
+    const frame = window.requestAnimationFrame(() => {
+      const node = inputRef.current;
+      if (!node) return;
+      node.focus();
+      if (typeof node.select === "function" && field.field_type !== "date") {
+        node.select();
       }
-      setStatus("error");
-      setStatusText(errorMessage(err, "Unable to save this cell."));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isEditing, field, value]);
+
+  async function finish(move) {
+    if (skipBlur.current) return;
+    skipBlur.current = true;
+    setSaving(true);
+    const saved = await onCommit(draft, move);
+    setSaving(false);
+    if (!saved) {
+      skipBlur.current = false;
+      inputRef.current?.focus();
     }
   }
 
   function onKeyDown(event) {
     if (event.key === "Enter") {
       event.preventDefault();
-      event.currentTarget.blur();
+      void finish("down");
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      void finish(event.shiftKey ? "left" : "right");
+      return;
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      cancelEdit();
+      skipBlur.current = true;
+      onCancel();
     }
   }
 
   const shown = cellText(field, value);
+  const tone = statusTone(shown);
+  const className = [
+    "editable-cell",
+    isEditing ? "is-active" : "",
+    pulse ? "cell-saved-pulse" : "",
+    saving ? "cell-saving" : "",
+    errorText ? "cell-error" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <td className={`editable-cell ${status ? `cell-${status}` : ""}`}>
-      {editing ? (
+    <td
+      className={className}
+      onClick={() => {
+        if (!isEditing) onBegin();
+      }}
+    >
+      {isEditing ? (
         field.field_type === "boolean" ? (
           <select
             ref={inputRef}
@@ -237,7 +264,9 @@ function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthoriz
             value={draft}
             aria-label={field.name}
             onChange={(event) => setDraft(event.target.value)}
-            onBlur={commitEdit}
+            onBlur={() => {
+              void finish(null);
+            }}
             onKeyDown={onKeyDown}
           >
             <option value="">—</option>
@@ -252,22 +281,20 @@ function EditableCell({ field, value, recordId, datasetId, onSaved, onUnauthoriz
             value={draft}
             aria-label={field.name}
             onChange={(event) => setDraft(event.target.value)}
-            onBlur={commitEdit}
+            onBlur={() => {
+              void finish(null);
+            }}
             onKeyDown={onKeyDown}
           />
         )
       ) : (
-        <div className="cell-display" onDoubleClick={beginEdit}>
-          <span className={shown ? undefined : "cell-empty"}>{shown || "—"}</span>
-          <button
-            className="cell-edit"
-            type="button"
-            aria-label={`Edit ${field.name}`}
-            onClick={beginEdit}
-          >
-            <Pencil size={13} aria-hidden="true" />
-          </button>
-          {statusText ? <span className="cell-status">{statusText}</span> : null}
+        <div className="cell-display">
+          {tone ? (
+            <span className={`status-pill status-${tone}`}>{shown}</span>
+          ) : (
+            <span className={shown ? undefined : "cell-empty"}>{shown || "—"}</span>
+          )}
+          {errorText ? <span className="cell-status">{errorText}</span> : null}
         </div>
       )}
     </td>
@@ -323,7 +350,22 @@ function DatasetDetail() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [sort, setSort] = useState(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterFieldId, setFilterFieldId] = useState("");
+  const [filterValue, setFilterValue] = useState("");
+  const [savedPulseKey, setSavedPulseKey] = useState("");
+  const [cellError, setCellError] = useState(null);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftValues, setDraftValues] = useState({});
+  const [draftError, setDraftError] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
   const fileInputRef = useRef(null);
+  const searchRef = useRef(null);
+  const filterRef = useRef(null);
+  const draftFirstRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -382,6 +424,51 @@ function DatasetDetail() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [modalOpen, rowModalOpen, deleteTarget, importOpen, submitting, rowSubmitting, deleting, importing]);
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      const dialogOpen = modalOpen || rowModalOpen || deleteTarget || importOpen;
+      if (dialogOpen) return;
+      const target = event.target;
+      const typing =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select?.();
+        return;
+      }
+      if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [modalOpen, rowModalOpen, deleteTarget, importOpen]);
+
+  useEffect(() => {
+    if (!filterOpen) return undefined;
+
+    function onPointerDown(event) {
+      if (!filterRef.current?.contains(event.target)) {
+        setFilterOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [filterOpen]);
+
+  useEffect(() => {
+    if (!draftOpen) return undefined;
+    draftFirstRef.current?.focus();
+  }, [draftOpen]);
 
   function handleLogout() {
     localStorage.clear();
@@ -633,6 +720,7 @@ function DatasetDetail() {
       await axios.post(`${API_BASE}/api/datasets/${id}/records`, { values }, authConfig());
       setRowModalOpen(false);
       setRowValues({});
+      setLastSavedAt(new Date().toISOString());
       await reloadRecords();
       notify("Row added");
     } catch (err) {
@@ -674,14 +762,172 @@ function DatasetDetail() {
 
   const fields = dataset?.fields || [];
   const needle = query.trim().toLowerCase();
+  const filterField = fields.find((field) => String(field.id) === String(filterFieldId)) || null;
+  const filterNeedle = filterValue.trim().toLowerCase();
   const filteredRecords = records.filter((record) => {
-    if (!needle) return true;
-    return fields.some((field) => {
-      const raw = record.values?.[field.field_key];
-      const displayed = cellText(field, raw).toLowerCase();
-      return displayed.includes(needle) || String(raw ?? "").toLowerCase().includes(needle);
-    });
+    if (needle) {
+      const matchesSearch = fields.some((field) => {
+        const raw = record.values?.[field.field_key];
+        const displayed = cellText(field, raw).toLowerCase();
+        return displayed.includes(needle) || String(raw ?? "").toLowerCase().includes(needle);
+      });
+      if (!matchesSearch) return false;
+    }
+    if (filterField && filterNeedle) {
+      const raw = record.values?.[filterField.field_key];
+      const displayed = cellText(filterField, raw).toLowerCase();
+      return displayed.includes(filterNeedle) || String(raw ?? "").toLowerCase().includes(filterNeedle);
+    }
+    return true;
   });
+  const viewRecords = sort
+    ? [...filteredRecords].sort((left, right) => {
+        const field = fields.find((entry) => entry.id === sort.fieldId);
+        if (!field) return 0;
+        const compared = compareCell(field, left, right);
+        return sort.direction === "desc" ? -compared : compared;
+      })
+    : filteredRecords;
+  const filterActive = Boolean(filterField && filterNeedle);
+
+  function cycleSort(field) {
+    setSort((current) => {
+      if (!current || current.fieldId !== field.id) {
+        return { fieldId: field.id, direction: "asc" };
+      }
+      if (current.direction === "asc") {
+        return { fieldId: field.id, direction: "desc" };
+      }
+      return null;
+    });
+  }
+
+  function moveEditing(recordId, fieldIndex, direction) {
+    const rowIndex = viewRecords.findIndex((row) => row.id === recordId);
+    if (rowIndex < 0 || fields.length === 0) {
+      setEditing(null);
+      return;
+    }
+
+    let nextRow = rowIndex;
+    let nextCol = fieldIndex;
+
+    if (direction === "down") {
+      if (rowIndex >= viewRecords.length - 1) {
+        setEditing(null);
+        return;
+      }
+      nextRow = rowIndex + 1;
+    } else if (direction === "right") {
+      nextCol += 1;
+      if (nextCol >= fields.length) {
+        nextCol = 0;
+        nextRow += 1;
+        if (nextRow >= viewRecords.length) {
+          setEditing(null);
+          return;
+        }
+      }
+    } else if (direction === "left") {
+      nextCol -= 1;
+      if (nextCol < 0) {
+        if (rowIndex === 0) {
+          setEditing(null);
+          return;
+        }
+        nextCol = fields.length - 1;
+        nextRow = rowIndex - 1;
+      }
+    }
+
+    setEditing({ recordId: viewRecords[nextRow].id, fieldIndex: nextCol });
+  }
+
+  async function commitCell(record, field, fieldIndex, draft, move) {
+    const currentValue = record.values?.[field.field_key];
+    if (!draftsMatch(field, currentValue, draft)) {
+      const nextValue =
+        field.field_type === "boolean" ? (draft === "" ? "" : draft === "true") : draft;
+      try {
+        const { data } = await axios.patch(
+          `${API_BASE}/api/datasets/${id}/records/${record.id}/cells`,
+          { field_id: field.id, value: nextValue },
+          authConfig()
+        );
+        handleCellSaved(record.id, field.field_key, data.updated?.value ?? nextValue);
+        const pulseKey = `${record.id}:${field.id}`;
+        setSavedPulseKey(pulseKey);
+        window.setTimeout(() => {
+          setSavedPulseKey((current) => (current === pulseKey ? "" : current));
+        }, 900);
+        setLastSavedAt(new Date().toISOString());
+        setCellError(null);
+        notify("Cell saved");
+      } catch (err) {
+        if (err.response?.status === 401) {
+          leaveForLogin();
+          return false;
+        }
+        setCellError({
+          key: `${record.id}:${field.id}`,
+          message: errorMessage(err, "Unable to save this cell."),
+        });
+        setEditing({ recordId: record.id, fieldIndex });
+        return false;
+      }
+    }
+
+    if (move) {
+      moveEditing(record.id, fieldIndex, move);
+    } else {
+      setEditing((current) => {
+        if (current && current.recordId === record.id && current.fieldIndex === fieldIndex) {
+          return null;
+        }
+        return current;
+      });
+    }
+    return true;
+  }
+
+  function beginInlineRow() {
+    setDraftValues(emptyRowValues(fields));
+    setDraftError("");
+    setDraftOpen(true);
+  }
+
+  function updateDraftValue(fieldKeyName, value) {
+    setDraftValues((current) => ({
+      ...current,
+      [fieldKeyName]: value,
+    }));
+  }
+
+  async function saveDraftRow() {
+    setDraftSaving(true);
+    setDraftError("");
+    const values = {};
+    for (const field of fields) {
+      values[field.field_key] = draftValues[field.field_key];
+    }
+
+    try {
+      await axios.post(`${API_BASE}/api/datasets/${id}/records`, { values }, authConfig());
+      setDraftOpen(false);
+      setDraftValues({});
+      setLastSavedAt(new Date().toISOString());
+      await reloadRecords();
+      notify("Row added");
+    } catch (err) {
+      if (err.response?.status === 401) {
+        leaveForLogin();
+        return;
+      }
+      setDraftError(errorMessage(err, "Unable to add this row."));
+    } finally {
+      setDraftSaving(false);
+    }
+  }
 
   return (
     <div className="dashboard">
@@ -773,22 +1019,84 @@ function DatasetDetail() {
                 <div>
                   <h2>Spreadsheet</h2>
                   <p className="sheet-count">
-                    {needle
-                      ? `${filteredRecords.length} of ${records.length} rows`
+                    {needle || filterActive
+                      ? `${viewRecords.length} of ${records.length} rows`
                       : `${records.length} ${records.length === 1 ? "row" : "rows"}`}
                   </p>
                 </div>
                 <div className="sheet-tools">
-                  <label className="sheet-search">
-                    <Search size={16} aria-hidden="true" />
-                    <input
-                      type="search"
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search rows"
-                      aria-label="Search rows"
-                    />
-                  </label>
+                  <div className="search-field">
+                    <label className="sheet-search">
+                      <Search size={16} aria-hidden="true" />
+                      <input
+                        ref={searchRef}
+                        type="text"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search rows"
+                        aria-label="Search rows"
+                      />
+                    </label>
+                    {query ? (
+                      <button
+                        className="search-clear"
+                        type="button"
+                        aria-label="Clear search"
+                        onClick={() => {
+                          setQuery("");
+                          searchRef.current?.focus();
+                        }}
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                    <kbd className="search-kbd">Ctrl+K /</kbd>
+                  </div>
+                  <div className="filter-anchor" ref={filterRef}>
+                    <button
+                      className={filterActive ? "logout-button filter-active" : "logout-button"}
+                      type="button"
+                      aria-expanded={filterOpen}
+                      aria-haspopup="dialog"
+                      onClick={() => setFilterOpen((open) => !open)}
+                    >
+                      <Filter size={16} strokeWidth={2} aria-hidden="true" />
+                      Filter
+                    </button>
+                    {filterOpen ? (
+                      <div className="filter-pop" role="dialog" aria-label="Filter rows">
+                        <select
+                          value={filterFieldId}
+                          aria-label="Filter column"
+                          onChange={(event) => setFilterFieldId(event.target.value)}
+                        >
+                          <option value="">Choose a column</option>
+                          {fields.map((field) => (
+                            <option key={field.id} value={field.id}>
+                              {field.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={filterValue}
+                          placeholder="Contains…"
+                          aria-label="Filter value"
+                          onChange={(event) => setFilterValue(event.target.value)}
+                        />
+                        <button
+                          className="logout-button"
+                          type="button"
+                          onClick={() => {
+                            setFilterFieldId("");
+                            setFilterValue("");
+                          }}
+                        >
+                          Clear filter
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     className="logout-button"
                     type="button"
@@ -800,12 +1108,20 @@ function DatasetDetail() {
                   </button>
                   <button className="logout-button" type="button" onClick={openImport}>
                     <Upload size={16} strokeWidth={2} aria-hidden="true" />
-                    Import Excel
+                    Import
+                  </button>
+                  <button
+                    className="logout-button"
+                    type="button"
+                    onClick={openRowModal}
+                    disabled={fields.length === 0}
+                  >
+                    Add with form
                   </button>
                   <button
                     className="upload-button"
                     type="button"
-                    onClick={openRowModal}
+                    onClick={beginInlineRow}
                     disabled={fields.length === 0}
                   >
                     <Plus size={18} strokeWidth={2} aria-hidden="true" />
@@ -819,65 +1135,207 @@ function DatasetDetail() {
                   {recordsError}
                 </p>
               ) : null}
-
-              {fields.length === 0 ? (
-                <p className="page-message">Add a column before entering rows.</p>
-              ) : null}
-
-              {fields.length > 0 && recordsLoading ? (
-                <p className="page-message">Loading rows…</p>
-              ) : null}
-
-              {fields.length > 0 && !recordsLoading && filteredRecords.length === 0 ? (
-                <p className="page-message">
-                  {records.length === 0 ? "No rows yet." : "No rows match your search."}
+              {draftError ? (
+                <p className="page-error" role="alert">
+                  {draftError}
                 </p>
               ) : null}
 
-              {fields.length > 0 && !recordsLoading && filteredRecords.length > 0 ? (
-                <div className="dataset-table-wrap sheet-table-wrap">
-                  <table className="dataset-table sheet-table">
-                    <thead>
-                      <tr>
-                        {fields.map((field) => (
-                          <th key={field.id}>
-                            {field.name}
-                            {field.is_required ? <span className="required-mark">*</span> : null}
-                          </th>
-                        ))}
-                        <th className="actions-col">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRecords.map((record) => (
-                        <tr key={record.id}>
-                          {fields.map((field) => (
-                            <EditableCell
-                              key={field.id}
-                              field={field}
-                              value={record.values?.[field.field_key]}
-                              recordId={record.id}
-                              datasetId={id}
-                              onSaved={handleCellSaved}
-                              onUnauthorized={leaveForLogin}
-                            />
-                          ))}
-                          <td className="actions-col">
-                            <button
-                              className="delete-row"
-                              type="button"
-                              onClick={() => setDeleteTarget(record)}
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
+              {fields.length === 0 ? (
+                <p className="page-message">Add a column before entering rows.</p>
+              ) : (
+                <>
+                  <div className="sheet-scroll">
+                    <div className="dataset-table-wrap sheet-table-wrap">
+                      <table className="dataset-table sheet-table">
+                        <thead>
+                          <tr>
+                            <th className="row-num" scope="col">
+                              #
+                            </th>
+                            {fields.map((field) => {
+                              const direction =
+                                sort?.fieldId === field.id ? sort.direction : "default";
+                              return (
+                                <th key={field.id} scope="col">
+                                  <button
+                                    className="col-sort"
+                                    type="button"
+                                    aria-label={
+                                      direction === "asc"
+                                        ? `${field.name}, sorted ascending`
+                                        : direction === "desc"
+                                          ? `${field.name}, sorted descending`
+                                          : `Sort ${field.name}`
+                                    }
+                                    onClick={() => cycleSort(field)}
+                                  >
+                                    <span>{field.name}</span>
+                                    {field.is_required ? (
+                                      <span className="required-mark">*</span>
+                                    ) : null}
+                                    <span className="type-badge">{typeLabel(field.field_type)}</span>
+                                    {direction === "asc" ? (
+                                      <ArrowUp size={14} className="sort-icon" aria-hidden="true" />
+                                    ) : direction === "desc" ? (
+                                      <ArrowDown size={14} className="sort-icon" aria-hidden="true" />
+                                    ) : (
+                                      <ArrowUpDown
+                                        size={14}
+                                        className="sort-icon is-idle"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                  </button>
+                                </th>
+                              );
+                            })}
+                            <th className="actions-col" scope="col">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recordsLoading ? (
+                            <tr>
+                              <td className="sheet-empty" colSpan={fields.length + 2}>
+                                Loading rows…
+                              </td>
+                            </tr>
+                          ) : null}
+                          {!recordsLoading && viewRecords.length === 0 ? (
+                            <tr>
+                              <td className="sheet-empty" colSpan={fields.length + 2}>
+                                {records.length === 0
+                                  ? "No rows yet."
+                                  : "No rows match your search or filter."}
+                              </td>
+                            </tr>
+                          ) : null}
+                          {!recordsLoading
+                            ? viewRecords.map((record, rowIndex) => (
+                                <tr key={record.id}>
+                                  <td className="row-num">{rowIndex + 1}</td>
+                                  {fields.map((field, fieldIndex) => (
+                                    <EditableCell
+                                      key={field.id}
+                                      field={field}
+                                      value={record.values?.[field.field_key]}
+                                      isEditing={
+                                        editing?.recordId === record.id &&
+                                        editing?.fieldIndex === fieldIndex
+                                      }
+                                      pulse={savedPulseKey === `${record.id}:${field.id}`}
+                                      errorText={
+                                        cellError?.key === `${record.id}:${field.id}`
+                                          ? cellError.message
+                                          : ""
+                                      }
+                                      onBegin={() =>
+                                        setEditing({ recordId: record.id, fieldIndex })
+                                      }
+                                      onCancel={() => setEditing(null)}
+                                      onCommit={(draft, move) =>
+                                        commitCell(record, field, fieldIndex, draft, move)
+                                      }
+                                    />
+                                  ))}
+                                  <td className="actions-col">
+                                    <button
+                                      className="delete-row"
+                                      type="button"
+                                      onClick={() => setDeleteTarget(record)}
+                                    >
+                                      <Trash2 size={14} aria-hidden="true" />
+                                      Delete
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            : null}
+                          {draftOpen ? (
+                            <tr className="draft-row">
+                              <td className="row-num">+</td>
+                              {fields.map((field, index) => (
+                                <td key={field.id}>
+                                  {field.field_type === "boolean" ? (
+                                    <select
+                                      ref={index === 0 ? draftFirstRef : undefined}
+                                      className="draft-input"
+                                      aria-label={field.name}
+                                      value={
+                                        draftValues[field.field_key] === true
+                                          ? "true"
+                                          : draftValues[field.field_key] === false
+                                            ? "false"
+                                            : ""
+                                      }
+                                      onChange={(event) =>
+                                        updateDraftValue(
+                                          field.field_key,
+                                          event.target.value === ""
+                                            ? ""
+                                            : event.target.value === "true"
+                                        )
+                                      }
+                                    >
+                                      <option value="">—</option>
+                                      <option value="true">Yes</option>
+                                      <option value="false">No</option>
+                                    </select>
+                                  ) : (
+                                    <input
+                                      ref={index === 0 ? draftFirstRef : undefined}
+                                      className="draft-input"
+                                      type={inputTypeFor(field.field_type)}
+                                      aria-label={field.name}
+                                      value={draftValues[field.field_key] ?? ""}
+                                      onChange={(event) =>
+                                        updateDraftValue(field.field_key, event.target.value)
+                                      }
+                                    />
+                                  )}
+                                </td>
+                              ))}
+                              <td className="actions-col">
+                                <div className="draft-actions">
+                                  <button
+                                    className="upload-button"
+                                    type="button"
+                                    onClick={saveDraftRow}
+                                    disabled={draftSaving}
+                                  >
+                                    {draftSaving ? "Saving…" : "Save"}
+                                  </button>
+                                  <button
+                                    className="logout-button"
+                                    type="button"
+                                    onClick={() => setDraftOpen(false)}
+                                    disabled={draftSaving}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div className="sheet-stats" aria-live="polite">
+                    <span>
+                      Total Rows <strong>{records.length}</strong>
+                    </span>
+                    <span>
+                      Filtered Rows <strong>{viewRecords.length}</strong>
+                    </span>
+                    <span>
+                      Last Saved <strong>{formatTimestamp(lastSavedAt)}</strong>
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           ) : null}
 

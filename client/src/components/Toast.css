@@ -13,17 +13,17 @@
 .toast {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid #c9ddd8;
-  background: #102033;
-  color: #fffdf9;
+  border: 1px solid #c7d2fe;
+  background: #0f172a;
+  color: #ffffff;
   box-shadow: 0 12px 30px rgba(16, 32, 51, 0.18);
   font-size: 14px;
   font-weight: 700;
 }
 
 .toast-success {
-  background: #0e6e62;
-  border-color: #0a534a;
+  background: #3730a3;
+  border-color: #312e81;
 }
 
 .toast-error {

@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { Database, Download, FolderOpen, LogOut, Plus, RotateCcw, Trash2, Users, X } from "lucide-react";
+import {
+  Database,
+  Download,
+  FolderOpen,
+  LogOut,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import "./Dashboard.css";
 import { useToast } from "../components/toast-context";
 
@@ -28,17 +40,29 @@ function formatRole(role) {
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function formatDate(value) {
+function relativeTime(value) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const abs = Math.abs(seconds);
+  if (abs < 60) return formatter.format(seconds, "second");
+  if (abs < 3600) return formatter.format(Math.round(seconds / 60), "minute");
+  if (abs < 86400) return formatter.format(Math.round(seconds / 3600), "hour");
+  if (abs < 86400 * 30) return formatter.format(Math.round(seconds / 86400), "day");
+  if (abs < 86400 * 365) return formatter.format(Math.round(seconds / (86400 * 30)), "month");
+  return formatter.format(Math.round(seconds / (86400 * 365)), "year");
+}
+
+function initials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
 function authConfig() {
@@ -85,6 +109,11 @@ function Dashboard() {
         : "role-badge";
 
   const [datasets, setDatasets] = useState([]);
+  const [stats, setStats] = useState({
+    total_datasets: 0,
+    total_records: 0,
+    active_users: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -103,6 +132,12 @@ function Dashboard() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
   const [roleSavingId, setRoleSavingId] = useState(null);
+  const [menuId, setMenuId] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameName, setRenameName] = useState("");
+  const [renameDescription, setRenameDescription] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -119,6 +154,9 @@ function Dashboard() {
         if (!active) return;
         const rows = response.data.datasets || [];
         setDatasets(showArchived ? rows.filter((dataset) => dataset.is_deleted) : rows);
+        if (response.data.stats) {
+          setStats(response.data.stats);
+        }
       } catch (err) {
         if (!active) return;
         if (err.response?.status === 401) {
@@ -140,7 +178,7 @@ function Dashboard() {
   }, [navigate, refreshKey, showArchived]);
 
   useEffect(() => {
-    const dialogOpen = modalOpen || adminOpen || deleteTarget;
+    const dialogOpen = modalOpen || adminOpen || deleteTarget || renameTarget;
     if (!dialogOpen) return undefined;
 
     function onKeyDown(event) {
@@ -148,11 +186,25 @@ function Dashboard() {
       setModalOpen(false);
       setAdminOpen(false);
       setDeleteTarget(null);
+      if (!renaming) setRenameTarget(null);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalOpen, adminOpen, deleteTarget, submitting, deleting]);
+  }, [modalOpen, adminOpen, deleteTarget, renameTarget, submitting, deleting, renaming]);
+
+  useEffect(() => {
+    if (menuId == null) return undefined;
+
+    function onPointerDown(event) {
+      if (!event.target.closest?.("[data-menu-root]")) {
+        setMenuId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [menuId]);
 
   function handleLogout() {
     localStorage.clear();
@@ -270,6 +322,43 @@ function Dashboard() {
     }
   }
 
+  function openRename(dataset) {
+    setMenuId(null);
+    setRenameTarget(dataset);
+    setRenameName(dataset.name || "");
+    setRenameDescription(dataset.description || "");
+    setRenameError("");
+  }
+
+  async function handleRename(event) {
+    event.preventDefault();
+    if (!renameTarget) return;
+    setRenaming(true);
+    setRenameError("");
+
+    try {
+      await axios.patch(
+        `${API_BASE}/api/datasets/${renameTarget.id}`,
+        {
+          name: renameName.trim(),
+          description: renameDescription.trim(),
+        },
+        authConfig()
+      );
+      setRenameTarget(null);
+      setRefreshKey((value) => value + 1);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        localStorage.clear();
+        navigate("/login");
+        return;
+      }
+      setRenameError(errorMessage(err, "Unable to rename this dataset."));
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   async function openAdminPanel() {
     setAdminOpen(true);
     setUsersLoading(true);
@@ -380,6 +469,21 @@ function Dashboard() {
             </div>
           </div>
 
+          <div className="stats-banner">
+            <article>
+              <span>Total Datasets</span>
+              <strong>{stats.total_datasets ?? 0}</strong>
+            </article>
+            <article>
+              <span>Total Records</span>
+              <strong>{stats.total_records ?? 0}</strong>
+            </article>
+            <article>
+              <span>Active Users</span>
+              <strong>{stats.active_users ?? 0}</strong>
+            </article>
+          </div>
+
           {error ? (
             <p className="page-error" role="alert">
               {error}
@@ -400,73 +504,111 @@ function Dashboard() {
           ) : null}
 
           {!loading && datasets.length > 0 ? (
-            <div className="dataset-table-wrap">
-              <table className="dataset-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Last Modified At</th>
-                    <th>Last Modified By</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {datasets.map((dataset) => (
-                    <tr key={dataset.id}>
-                      <td>{dataset.name}</td>
-                      <td>{dataset.description || "—"}</td>
-                      <td>{formatDate(dataset.last_modified_at || dataset.updated_at)}</td>
-                      <td>{dataset.last_modified_by || "—"}</td>
-                      <td>
-                        <div className="row-actions">
-                          {!dataset.is_deleted ? (
-                            <button
-                              className="row-action"
-                              type="button"
-                              onClick={() => navigate(`/datasets/${dataset.id}`)}
-                            >
-                              Open
-                            </button>
-                          ) : null}
-                          {!dataset.is_deleted ? (
-                            <button
-                              className="row-action"
-                              type="button"
-                              onClick={() => handleDownload(dataset)}
-                              disabled={downloadingId === dataset.id}
-                            >
-                              <Download size={14} aria-hidden="true" />
-                              {downloadingId === dataset.id ? "Downloading…" : "Download"}
-                            </button>
-                          ) : null}
-                          {isAdmin && !dataset.is_deleted ? (
-                            <button
-                              className="delete-row"
-                              type="button"
-                              onClick={() => setDeleteTarget(dataset)}
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                              Delete
-                            </button>
-                          ) : null}
-                          {isAdmin && dataset.is_deleted ? (
-                            <button
-                              className="row-action"
-                              type="button"
-                              onClick={() => handleRestore(dataset)}
-                              disabled={restoringId === dataset.id}
-                            >
-                              <RotateCcw size={14} aria-hidden="true" />
-                              {restoringId === dataset.id ? "Restoring…" : "Restore"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="file-grid">
+              {datasets.map((dataset) => {
+                const author = dataset.last_modified_by || dataset.created_by_name || "";
+                const menuOpen = menuId === dataset.id;
+                return (
+                  <article className="file-card" key={dataset.id}>
+                    <div className="file-card-top">
+                      <h2>
+                        {dataset.is_deleted ? (
+                          dataset.name
+                        ) : (
+                          <button type="button" onClick={() => navigate(`/datasets/${dataset.id}`)}>
+                            {dataset.name}
+                          </button>
+                        )}
+                      </h2>
+                      <div className="menu-root" data-menu-root>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={`Actions for ${dataset.name}`}
+                          aria-expanded={menuOpen}
+                          aria-haspopup="menu"
+                          onClick={() => setMenuId(menuOpen ? null : dataset.id)}
+                        >
+                          <MoreHorizontal size={18} aria-hidden="true" />
+                        </button>
+                        {menuOpen ? (
+                          <div className="card-menu" role="menu">
+                            {!dataset.is_deleted ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => navigate(`/datasets/${dataset.id}`)}
+                              >
+                                <FolderOpen size={14} aria-hidden="true" />
+                                Open
+                              </button>
+                            ) : null}
+                            {!dataset.is_deleted ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={downloadingId === dataset.id}
+                                onClick={() => {
+                                  setMenuId(null);
+                                  handleDownload(dataset);
+                                }}
+                              >
+                                <Download size={14} aria-hidden="true" />
+                                {downloadingId === dataset.id ? "Exporting…" : "Export"}
+                              </button>
+                            ) : null}
+                            {!dataset.is_deleted ? (
+                              <button type="button" role="menuitem" onClick={() => openRename(dataset)}>
+                                <Pencil size={14} aria-hidden="true" />
+                                Rename
+                              </button>
+                            ) : null}
+                            {isAdmin && !dataset.is_deleted ? (
+                              <button
+                                className="menu-danger"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setMenuId(null);
+                                  setDeleteTarget(dataset);
+                                }}
+                              >
+                                <Trash2 size={14} aria-hidden="true" />
+                                Archive / Delete
+                              </button>
+                            ) : null}
+                            {isAdmin && dataset.is_deleted ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={restoringId === dataset.id}
+                                onClick={() => {
+                                  setMenuId(null);
+                                  handleRestore(dataset);
+                                }}
+                              >
+                                <RotateCcw size={14} aria-hidden="true" />
+                                {restoringId === dataset.id ? "Restoring…" : "Restore"}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <p className="file-card-desc">{dataset.description || "No description"}</p>
+                    <div className="file-card-badges">
+                      <span className="count-badge">{dataset.records_count ?? 0} records</span>
+                      <span className="count-badge">{dataset.fields_count ?? 0} columns</span>
+                    </div>
+                    <div className="file-card-foot">
+                      <span className="avatar" title={author || "Unknown"}>
+                        {initials(author)}
+                      </span>
+                      <span>{relativeTime(dataset.last_modified_at || dataset.updated_at)}</span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : null}
         </section>
@@ -538,6 +680,75 @@ function Dashboard() {
                 </button>
                 <button className="upload-button" type="submit" disabled={submitting}>
                   {submitting ? "Creating…" : "Create Dataset"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {renameTarget ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!renaming) setRenameTarget(null);
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-dataset-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <h2 id="rename-dataset-title">Rename dataset</h2>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close"
+                onClick={() => setRenameTarget(null)}
+                disabled={renaming}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form className="modal-form" onSubmit={handleRename}>
+              {renameError ? (
+                <p className="page-error" role="alert">
+                  {renameError}
+                </p>
+              ) : null}
+              <label>
+                Name
+                <input
+                  type="text"
+                  value={renameName}
+                  onChange={(event) => setRenameName(event.target.value)}
+                  required
+                  autoFocus
+                  maxLength={255}
+                />
+              </label>
+              <label>
+                Description
+                <textarea
+                  value={renameDescription}
+                  onChange={(event) => setRenameDescription(event.target.value)}
+                  rows={4}
+                />
+              </label>
+              <div className="modal-actions">
+                <button
+                  className="logout-button"
+                  type="button"
+                  onClick={() => setRenameTarget(null)}
+                  disabled={renaming}
+                >
+                  Cancel
+                </button>
+                <button className="upload-button" type="submit" disabled={renaming}>
+                  {renaming ? "Saving…" : "Save"}
                 </button>
               </div>
             </form>

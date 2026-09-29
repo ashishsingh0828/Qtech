@@ -12,6 +12,7 @@ const {
   softDeleteDataset,
   restoreDataset,
   updateCell,
+  updateDataset,
   getAuditLogs,
 } = require("../controllers/datasetController");
 const { previewExcel, importExcel, exportExcel } = require("../controllers/excelController");
@@ -56,6 +57,7 @@ router.post("/:id/preview-excel", excelUpload, previewExcel);
 router.post("/:id/import-excel", excelUpload, importExcel);
 router.get("/:id/export-excel", exportExcel);
 router.patch("/:id/restore", requireRole(["Admin"]), restoreDataset);
+router.patch("/:id", updateDataset);
 router.delete("/:id", requireRole(["Admin"]), softDeleteDataset);
 router.get("/:id", getDataset);
 router.post("/:id/fields", requireRole(["Admin"]), addField);

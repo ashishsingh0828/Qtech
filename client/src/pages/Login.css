@@ -4,27 +4,27 @@
   place-items: center;
   padding: 32px 20px;
   background:
-    radial-gradient(circle at top left, rgba(196, 161, 90, 0.18), transparent 32%),
-    linear-gradient(160deg, #f7f4ee 0%, #e7efe9 48%, #f3efe6 100%);
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.16), transparent 32%),
+    linear-gradient(160deg, #f8fafc 0%, #eef2ff 48%, #f8fafc 100%);
 }
 
 .login-card {
   width: min(920px, 100%);
   display: grid;
   grid-template-columns: 1.05fr 1fr;
-  background: #fffdf9;
-  border: 1px solid #e6dfd2;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 22px;
   overflow: hidden;
-  box-shadow: 0 28px 70px rgba(16, 32, 51, 0.12);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.12);
 }
 
 .login-brand {
   padding: 48px 40px;
-  color: #f6f1e7;
+  color: #eef2ff;
   background:
-    linear-gradient(165deg, rgba(196, 161, 90, 0.18), transparent 42%),
-    #102033;
+    linear-gradient(165deg, rgba(129, 140, 248, 0.35), transparent 46%),
+    linear-gradient(180deg, #312e81 0%, #1e1b4b 100%);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -47,7 +47,7 @@
   letter-spacing: 0.22em;
   text-transform: uppercase;
   font-size: 12px;
-  color: #d7c08a;
+  color: #c7d2fe;
 }
 
 .login-brand h1 {
@@ -56,7 +56,7 @@
   line-height: 1.05;
   letter-spacing: -0.04em;
   font-weight: 600;
-  color: #fffdf9;
+  color: #ffffff;
 }
 
 .brand-copy {
@@ -78,13 +78,13 @@
   margin: 0;
   font-size: 28px;
   letter-spacing: -0.03em;
-  color: #102033;
+  color: #0f172a;
   font-weight: 600;
 }
 
 .form-heading p {
   margin: 6px 0 0;
-  color: #5d6b7c;
+  color: #64748b;
   font-size: 15px;
 }
 
@@ -117,7 +117,7 @@
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: #243246;
+  color: #1e293b;
 }
 
 .field-control {
@@ -127,14 +127,14 @@
   padding: 0 14px;
   min-height: 48px;
   border-radius: 12px;
-  border: 1px solid #ddd4c6;
+  border: 1px solid #e2e8f0;
   background: #fff;
-  color: #6d7b8c;
+  color: #64748b;
 }
 
 .field-control:focus-within {
-  border-color: #0e6e62;
-  box-shadow: 0 0 0 4px rgba(14, 110, 98, 0.12);
+  border-color: #3730a3;
+  box-shadow: 0 0 0 4px rgba(55, 48, 163, 0.14);
 }
 
 .field-control input {
@@ -142,7 +142,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #102033;
+  color: #0f172a;
   font: inherit;
   font-size: 15px;
   padding: 12px 0;
@@ -153,8 +153,8 @@
   min-height: 50px;
   border: 0;
   border-radius: 12px;
-  background: #0e6e62;
-  color: #fffdf9;
+  background: #3730a3;
+  color: #ffffff;
   font: inherit;
   font-size: 15px;
   font-weight: 700;
@@ -166,7 +166,7 @@
 }
 
 .submit-button:hover:not(:disabled) {
-  background: #0a534a;
+  background: #312e81;
 }
 
 .submit-button:disabled {

@@ -47,13 +47,17 @@ const getDatasets = async (req, res) => {
         d.deleted_at,
         d.updated_at AS last_modified_at,
         COALESCE(editor.name, creator.name) AS last_modified_by,
-        COUNT(f.id)::int AS fields_count
+        COUNT(DISTINCT f.id)::int AS fields_count,
+        COUNT(DISTINCT r.id)::int AS records_count
       FROM datasets d
       LEFT JOIN users creator ON creator.id = d.created_by
       LEFT JOIN users editor ON editor.id = d.updated_by
       LEFT JOIN fields f
         ON f.dataset_id = d.id
        AND f.is_deleted = FALSE
+      LEFT JOIN records r
+        ON r.dataset_id = d.id
+       AND r.is_deleted = FALSE
       WHERE ($1::boolean = TRUE OR d.is_deleted = FALSE)
       GROUP BY d.id, creator.name, editor.name
       ORDER BY d.updated_at DESC, d.id DESC
@@ -61,7 +65,23 @@ const getDatasets = async (req, res) => {
       [includeDeleted]
     );
 
-    res.json({ datasets: result.rows });
+    const statsResult = await pool.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM datasets WHERE is_deleted = FALSE) AS total_datasets,
+        (
+          SELECT COUNT(*)::int
+          FROM records rec
+          INNER JOIN datasets ds ON ds.id = rec.dataset_id
+          WHERE rec.is_deleted = FALSE
+            AND ds.is_deleted = FALSE
+        ) AS total_records,
+        (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS active_users
+    `);
+
+    res.json({
+      datasets: result.rows,
+      stats: statsResult.rows[0],
+    });
   } catch (error) {
     console.error("Get datasets error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -99,6 +119,7 @@ const createDataset = async (req, res) => {
         ...result.rows[0],
         created_by_name: creator.rows[0]?.name || null,
         fields_count: 0,
+        records_count: 0,
       },
     });
   } catch (error) {
@@ -750,6 +771,50 @@ const updateCell = async (req, res) => {
   }
 };
 
+const updateDataset = async (req, res) => {
+  const id = Number(req.params.id);
+  const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+  const hasDescription = Object.prototype.hasOwnProperty.call(req.body, "description");
+  const description =
+    typeof req.body.description === "string" ? req.body.description.trim() : "";
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid dataset id" });
+  }
+
+  if (!name) {
+    return res.status(400).json({ error: "Dataset name is required" });
+  }
+
+  try {
+    await ensureArchiveColumn();
+
+    const result = await pool.query(
+      `
+      UPDATE datasets
+      SET
+        name = $1,
+        description = CASE WHEN $2::boolean THEN $3 ELSE description END,
+        updated_by = $4,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+        AND is_deleted = FALSE
+      RETURNING id, name, description, updated_at, updated_by
+      `,
+      [name, hasDescription, description || null, req.user?.id || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    res.json({ dataset: result.rows[0] });
+  } catch (error) {
+    console.error("Update dataset error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 const getAuditLogs = async (req, res) => {
   const datasetId = Number(req.params.id);
 
@@ -806,6 +871,7 @@ module.exports = {
   softDeleteDataset,
   restoreDataset,
   updateCell,
+  updateDataset,
   getAuditLogs,
   normalizeFieldKey,
   normalizeCellValue,
